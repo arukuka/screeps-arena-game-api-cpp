@@ -1,5 +1,26 @@
 {
-  "dependencies": {
-    "rollup-plugin-terser": "^7.0.2"
+  "name": "screeps-arena-game-api-cpp",
+  "version": "0.1.0",
+  "description": "Write Screeps: Arena bots in C++, compiled to WASM, with a local simulator",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "setup": "scripts/setup-emsdk.sh",
+
+    "build": "scripts/with-emsdk.sh cmake --preset wasm && scripts/with-emsdk.sh cmake --build --preset wasm",
+    "build:debug": "scripts/with-emsdk.sh cmake --preset wasm-debug && scripts/with-emsdk.sh cmake --build --preset wasm-debug",
+    "bundle": "npm run build && rollup -c",
+    "deploy": "npm run bundle && cp dist/main.mjs \"${ARENA_DIR:-$HOME/ScreepsArena/season4-pain_and_gain}/main.mjs\"",
+
+    "sim": "npm run build && node sim/run.mjs",
+
+    "test": "npm run test:cpp && npm run test:sim",
+    "test:cpp": "cmake --preset native && cmake --build --preset native && ctest --preset native",
+    "test:sim": "npm run bundle && node --test \"sim/**/*.test.mjs\"",
+
+    "clean": "rm -rf build dist"
+  },
+  "devDependencies": {
+    "rollup": "^4.60.0"
   }
 }
