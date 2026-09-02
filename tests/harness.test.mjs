@@ -8,13 +8,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createMatch } from './harness.mjs';
-import { World } from './world.mjs';
+import { World, createMatch } from '../sim/index.mjs';
+
+import createArenaBot from '../build/fixtures/probe_bot.mjs';
 
 describe('WASM bot against the simulator', () => {
   it('reads getTicks() through the WASM boundary', () => {
     const world = new World();
-    const match = createMatch({ world });
+    const match = createMatch({ createArenaBot, world });
 
     match.run(3);
 
@@ -22,7 +23,7 @@ describe('WASM bot against the simulator', () => {
   });
 
   it('observes the simulated tick counter, starting at 1', () => {
-    const match = createMatch();
+    const match = createMatch({ createArenaBot });
 
     match.run(3);
 
@@ -34,7 +35,7 @@ describe('WASM bot against the simulator', () => {
   });
 
   it('keeps C++ heap state across ticks', () => {
-    const match = createMatch();
+    const match = createMatch({ createArenaBot });
 
     match.run(5);
 
@@ -43,10 +44,10 @@ describe('WASM bot against the simulator', () => {
   });
 
   it('gives each match an isolated WASM instance', () => {
-    const first = createMatch();
+    const first = createMatch({ createArenaBot });
     first.run(2);
 
-    const second = createMatch();
+    const second = createMatch({ createArenaBot });
     second.run(1);
 
     assert.equal(second.logs[0], 'tick 1 (loop #1, previous 0)');
@@ -71,7 +72,7 @@ describe('WASM bot against the simulator', () => {
     const log = globalThis.console.log.bind(globalThis.console);
 
     withConsole({ log }, () => {
-      const match = createMatch();
+      const match = createMatch({ createArenaBot });
       match.run(1);
 
       assert.equal(match.logs[0], 'tick 1 (loop #1, previous 0)');
@@ -82,7 +83,7 @@ describe('WASM bot against the simulator', () => {
     const log = globalThis.console.log.bind(globalThis.console);
 
     withConsole(Object.freeze({ log }), () => {
-      const match = createMatch();
+      const match = createMatch({ createArenaBot });
       match.run(1);
 
       assert.equal(match.logs[0], 'tick 1 (loop #1, previous 0)');
@@ -90,8 +91,8 @@ describe('WASM bot against the simulator', () => {
   });
 
   it('interleaves two matches without mixing up their worlds', () => {
-    const slow = createMatch({ world: new World() });
-    const fast = createMatch({ world: new World() });
+    const slow = createMatch({ createArenaBot, world: new World() });
+    const fast = createMatch({ createArenaBot, world: new World() });
 
     fast.run(4);
     slow.runTick();

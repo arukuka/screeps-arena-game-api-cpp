@@ -7,9 +7,9 @@
  * Only the functions the bot actually calls are implemented. Adding one means:
  *   1. implement it here against `world()`
  *   2. expose it in `js/host.mjs`
- *   3. add an `EM_JS` bridge in `cpp/arena/utils_wasm.cc` and a declaration in
- *      `cpp/arena/utils.h`
- *   4. add a fake in `tests/fakes/` so native unit tests keep building
+ *   3. add an `EM_JS` bridge in `src/utils_wasm.cc` and a declaration in
+ *      `include/arena/utils.h`
+ *   4. add a fake in `testing/fake.cc` so native unit tests keep linking
  */
 
 import { world } from './_current.mjs';

@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { setWorld } from './game/_current.mjs';
-import { arenaInfo } from './game/index.mjs';
-import { getTicks } from './game/utils.mjs';
-import { DEFAULT_ARENA_INFO, World } from './world.mjs';
+import { arenaInfo } from '../sim/game/index.mjs';
+import { getTicks } from '../sim/game/utils.mjs';
+import { DEFAULT_ARENA_INFO, World, setWorld } from '../sim/index.mjs';
 
 describe('simulated game API', () => {
   it('numbers ticks from 1, as the Arena does', () => {

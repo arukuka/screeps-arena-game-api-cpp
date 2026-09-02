@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Installs the project-local Emscripten SDK into third_party/emsdk.
+# Installs the Emscripten SDK into ./third_party/emsdk.
 #
-# The version is pinned here so every checkout produces the same WASM.
+# The version is pinned here so every checkout produces the same WASM. If you
+# already have an SDK activated ($EMSDK), you do not need this.
 set -euo pipefail
 
 EMSDK_VERSION="6.0.9"
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-emsdk_dir="${repo_root}/third_party/emsdk"
+emsdk_dir="${PWD}/third_party/emsdk"
 
 if [[ ! -d "${emsdk_dir}/.git" ]]; then
   git clone --depth 1 https://github.com/emscripten-core/emsdk.git "${emsdk_dir}"

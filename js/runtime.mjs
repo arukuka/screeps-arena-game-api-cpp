@@ -18,8 +18,6 @@
  * module is being evaluated -- only what a tick writes reaches the match log.
  */
 
-import createArenaBot from '../dist/wasm/bot.mjs';
-
 /** The 8-byte header that is, on its own, a valid empty WASM module. */
 const EMPTY_WASM_MODULE = new Uint8Array([
   0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
@@ -117,10 +115,14 @@ function ensureConsoleMethods(log) {
 }
 
 /**
+ * @param {(moduleArg: object) => Promise<object>} createArenaBot
+ *   the Emscripten factory, i.e. the default export of the `.mjs` that
+ *   `arena_add_bot()` produced. Passed in rather than imported, because only
+ *   the bot project knows where its own build output lives.
  * @param {object} host  the table from `createHost()`
  * @returns {{ loop: () => void }}
  */
-export function createBot(host) {
+export function createBot(createArenaBot, host) {
   ensureConsoleMethods(host.log);
 
   const module = {

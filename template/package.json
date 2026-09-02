@@ -1,0 +1,30 @@
+{
+  "name": "my-arena-bot",
+  "version": "0.1.0",
+  "description": "A Screeps: Arena bot written in C++",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "setup": "arena-emsdk-setup",
+
+    "build": "arena-with-emsdk cmake --preset wasm && arena-with-emsdk cmake --build --preset wasm",
+    "build:debug": "arena-with-emsdk cmake --preset wasm-debug && arena-with-emsdk cmake --build --preset wasm-debug",
+    "bundle": "npm run build && rollup -c",
+
+    "sim": "npm run build && node sim/run.mjs",
+
+    "test": "npm run test:cpp && npm run test:sim",
+    "test:cpp": "cmake --preset native && cmake --build --preset native && ctest --preset native",
+    "test:sim": "npm run build && node --test \"tests/**/*.test.mjs\"",
+
+    "deploy": "npm run bundle && cp dist/main.mjs \"${ARENA_DIR:?set ARENA_DIR to your arena source folder}/main.mjs\"",
+
+    "clean": "rm -rf build dist"
+  },
+  "dependencies": {
+    "screeps-arena-game-api-cpp": "github:arukuka/screeps-arena-game-api-cpp"
+  },
+  "devDependencies": {
+    "rollup": "^4.60.0"
+  }
+}

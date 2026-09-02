@@ -1,89 +1,53 @@
 cmake_minimum_required(VERSION 3.25)
-project(screeps_arena_bot CXX)
+project(screeps_arena_game_api_cpp CXX)
+
+# Consumed two ways:
+#
+#   * as a subdirectory of a bot project (the supported path -- see template/),
+#     where only the library targets and arena_add_bot() matter
+#   * standalone, when developing the library itself, which additionally builds
+#     the test fixtures and the test suite
+#
+# PROJECT_IS_TOP_LEVEL tells the two apart, so a consumer never builds our tests.
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/ArenaBot.cmake")
+
 # ---------------------------------------------------------------------------
-# Bot logic. Knows nothing about Emscripten: it talks to the game only through
-# `cpp/arena/*.h`, which is what lets the native test build swap in fakes.
+# arena::headers -- the API a bot compiles against.
 # ---------------------------------------------------------------------------
-add_library(bot_logic STATIC
-  cpp/bot/bot.cc
-)
-target_include_directories(bot_logic PUBLIC cpp)
-target_compile_options(bot_logic PRIVATE -Wall -Wextra -Wpedantic)
+add_library(arena_headers INTERFACE)
+add_library(arena::headers ALIAS arena_headers)
+target_include_directories(arena_headers INTERFACE "${CMAKE_CURRENT_LIST_DIR}/include")
+target_compile_features(arena_headers INTERFACE cxx_std_23)
 
 if(EMSCRIPTEN)
   # -------------------------------------------------------------------------
-  # WASM build: bot logic + the real JS bridge, linked into an ES module that
-  # `js/main.mjs` (Arena) and `sim/` (local) both load.
+  # arena::api -- the real bridge. Link this to talk to the game.
   # -------------------------------------------------------------------------
-  add_library(arena_api STATIC
-    cpp/arena/utils_wasm.cc
-  )
-  target_include_directories(arena_api PUBLIC cpp)
+  add_library(arena_api STATIC src/utils_wasm.cc)
+  add_library(arena::api ALIAS arena_api)
+  target_link_libraries(arena_api PUBLIC arena::headers)
   target_compile_options(arena_api PRIVATE -Wall -Wextra -Wpedantic)
-
-  add_executable(bot cpp/entry/loop.cc)
-  target_link_libraries(bot PRIVATE bot_logic arena_api)
-
-  set_target_properties(bot PROPERTIES
-    SUFFIX ".mjs"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/dist/wasm"
-  )
-
-  target_link_options(bot PRIVATE
-    # --- shape of the generated glue ---
-    -sMODULARIZE=1              # export a factory instead of touching globals
-    -sEXPORT_ES6=1              # ...as an ES module, like the Arena expects
-    -sEXPORT_NAME=createArenaBot
-    -sENVIRONMENT=shell         # Arena's sandbox is neither browser nor Node.
-                                # Keeping Node out of the build matters: the
-                                # Node branch starts with `await import(...)`,
-                                # which would make the factory suspend before
-                                # the exports are attached. See js/runtime.mjs.
-
-    # --- one deployable file, instantiated without awaiting ---
-    -sSINGLE_FILE=1             # embed the .wasm in the .mjs
-    -sSINGLE_FILE_BINARY_ENCODE=0
-                                # ...as base64, not Emscripten 6's default
-                                # binary-string encoding. That default is ~25%
-                                # smaller but, per Emscripten's own docs, needs
-                                # the file to survive transport as UTF-8. The
-                                # Arena pipeline (client reads the file -> jszip
-                                # -> upload -> server -> isolated-vm) makes no
-                                # such promise, and a single mangled byte turns
-                                # into a WebAssembly.CompileError at startup.
-                                # Base64 is pure ASCII; sim/bundle.test.mjs
-                                # enforces that.
-    -sWASM_ASYNC_COMPILATION=0  # instantiate synchronously, so `loop()` is
-                                # callable the moment the factory returns and
-                                # main.mjs needs no top-level await
-    -sINVOKE_RUN=0              # there is no main(); the Arena drives loop()
-
-    # --- exported surface ---
-    -sEXPORTED_FUNCTIONS=_arena_loop
-    -sEXPORTED_RUNTIME_METHODS=
-
-    # --- memory ---
-    # A fixed heap keeps allocation off the per-tick CPU budget. Raise
-    # INITIAL_MEMORY rather than enabling growth if the bot needs more.
-    -sALLOW_MEMORY_GROWTH=0
-    -sINITIAL_MEMORY=16MB
-    -sSTACK_SIZE=1MB
-  )
-
-  target_link_options(bot PRIVATE
-    $<$<CONFIG:Debug>:-sASSERTIONS=2 -g -O0>
-    $<$<CONFIG:Release>:-sASSERTIONS=0 -O3 --closure=0>
-  )
 else()
   # -------------------------------------------------------------------------
-  # Native build: unit tests only. No Emscripten, no Node, fast feedback.
+  # arena::testing -- the same API backed by fakes, for native unit tests.
+  # Same headers, different translation unit, so bot sources need no seams.
   # -------------------------------------------------------------------------
-  include(CTest)
+  add_library(arena_testing STATIC testing/fake.cc)
+  add_library(arena::testing ALIAS arena_testing)
+  target_link_libraries(arena_testing PUBLIC arena::headers)
+  target_include_directories(arena_testing PUBLIC "${CMAKE_CURRENT_LIST_DIR}/testing/include")
+  target_compile_options(arena_testing PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+if(PROJECT_IS_TOP_LEVEL)
+  if(NOT EMSCRIPTEN)
+    include(CTest)
+  endif()
   add_subdirectory(tests)
 endif()

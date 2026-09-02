@@ -1,22 +1,44 @@
 {
   "name": "screeps-arena-game-api-cpp",
   "version": "0.1.0",
-  "description": "Write Screeps: Arena bots in C++, compiled to WASM, with a local simulator",
+  "description": "Write Screeps: Arena bots in C++ (WASM), with a local simulator",
   "type": "module",
-  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arukuka/screeps-arena-game-api-cpp.git"
+  },
+  "keywords": ["screeps", "screeps-arena", "wasm", "emscripten", "cpp"],
+  "exports": {
+    ".": "./js/index.mjs",
+    "./arena": "./js/arena.mjs",
+    "./sim": "./sim/index.mjs",
+    "./rollup": "./js/rollup.mjs",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "arena-with-emsdk": "scripts/with-emsdk.sh",
+    "arena-emsdk-setup": "scripts/setup-emsdk.sh"
+  },
+  "files": [
+    "CMakeLists.txt",
+    "cmake/",
+    "include/",
+    "src/",
+    "testing/",
+    "js/",
+    "sim/",
+    "scripts/"
+  ],
   "scripts": {
     "setup": "scripts/setup-emsdk.sh",
 
-    "build": "scripts/with-emsdk.sh cmake --preset wasm && scripts/with-emsdk.sh cmake --build --preset wasm",
-    "build:debug": "scripts/with-emsdk.sh cmake --preset wasm-debug && scripts/with-emsdk.sh cmake --build --preset wasm-debug",
-    "bundle": "npm run build && rollup -c",
-    "deploy": "npm run bundle && cp dist/main.mjs \"${ARENA_DIR:-$HOME/ScreepsArena/season4-pain_and_gain}/main.mjs\"",
+    "build:fixtures": "scripts/with-emsdk.sh cmake --preset wasm && scripts/with-emsdk.sh cmake --build --preset wasm",
 
-    "sim": "npm run build && node sim/run.mjs",
-
-    "test": "npm run test:cpp && npm run test:sim",
+    "test": "npm run test:cpp && npm run test:sim && npm run test:external",
     "test:cpp": "cmake --preset native && cmake --build --preset native && ctest --preset native",
-    "test:sim": "npm run bundle && node --test \"sim/**/*.test.mjs\"",
+    "test:sim": "npm run build:fixtures && node --test tests/harness.test.mjs tests/world.test.mjs",
+    "test:external": "node --test tests/external/consume.test.mjs",
 
     "clean": "rm -rf build dist"
   },

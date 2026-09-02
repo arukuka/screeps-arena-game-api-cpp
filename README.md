@@ -1,10 +1,9 @@
 # screeps-arena-game-api-cpp
 
-Screeps: Arena のボットを **C++ (WASM)** で書くための土台。
-ローカルシミュレータ付きで、実際にデプロイしなくてもテストが回る。
+Screeps: Arena のボットを **C++ (WASM)** で書くためのライブラリ。
+ローカルシミュレータと、Emscripten を知らなくても済む CMake ヘルパ付き。
 
-現在の到達点: **C++ の `loop()` から `game/utils.getTicks()` を呼び出す**縦の一本が
-実機で通っている。Season 4 (Pain and Gain) にデプロイし、**2000 tick 完走**を確認済み。
+実機で動作確認済み。Season 4 (Pain and Gain) にデプロイし **2000 tick 完走**している。
 
 ```
 tick 1 (loop #1, previous 0)
@@ -18,143 +17,140 @@ tick 2000 (loop #2000, previous 1999)
 
 ---
 
-## ビルドシステムの選択: CMake
+## クイックスタート
 
-Bazel でも CMake でも良い、という要件に対して **CMake + emsdk** を選んだ。理由:
+[`template/`](template/) をコピーして始めるのが早い。
 
-| | CMake | Bazel |
-|---|---|---|
-| Emscripten 連携 | `emcmake` は Emscripten 公式が第一級でサポートする経路 | `emsdk` の Bazel ルールは事実上メンテが止まっており、旧構成が pin していた emscripten は **3.1.8 (2022年)** |
-| clangd | `CMAKE_EXPORT_COMPILE_COMMANDS=ON` だけで `compile_commands.json` が出る | `bazel-compilation-database` (grailbio, 更新停止) の追加が必要だった |
-| ネイティブテスト | 同じ `CMakeLists.txt` に preset を足すだけ | ツールチェーン切り替えに `--crosstool_top` (非推奨フラグ) が必要だった |
-| JS 側との同居 | npm scripts がそのままタスクランナーになる | `rules_nodejs` を持ち込むことになり重い |
+```sh
+cp -r template my-bot && cd my-bot
+npm install
+npm run setup      # Emscripten 6.0.9 を third_party/emsdk へ (初回のみ、数分)
+npm test           # C++ 単体テスト + シミュレータ
+npm run sim -- --ticks 5
+```
 
-旧 Bazel 構成 (`WORKSPACE` / `BUILD` / `.bazelrc` / `loop.cc` ほか) は削除し、
-依存はすべて現行版に更新した。
+書くのは `src/bot.cc` の `arena::loop()` だけ。
 
-| | 旧 | 新 |
-|---|---|---|
-| Emscripten | 3.1.8 | **6.0.9** |
-| ビルド | Bazel + emsdk rules | **CMake 3.25+ / Ninja + CMakePresets** |
-| バンドラ | rollup + `rollup-plugin-terser` (deprecated) | **rollup 4** (minify なし) |
-| C++ | (規定) | **C++23** |
-| テスト | なし | **GoogleTest 1.17** (ネイティブ) + `node:test` (E2E) |
+```cpp
+#include <arena/bot.h>
+#include <arena/utils.h>
+
+namespace arena {
+void loop() {
+  std::printf("tick %d\n", getTicks());
+}
+}  // namespace arena
+```
+
+デプロイ:
+
+```sh
+ARENA_DIR=~/ScreepsArena/season4-pain_and_gain npm run deploy
+```
+
+必要なもの: Node 22+, CMake 3.25+, Ninja (macOS なら `brew install cmake ninja`)。
+
+---
+
+## 何を提供するか
+
+### C++
+
+| ヘッダ | 内容 |
+|---|---|
+| `<arena/bot.h>` | `arena::loop()` の**宣言のみ**。あなたが実装する。忘れるとリンクエラーになる |
+| `<arena/utils.h>` | `game/utils` のミラー。現状 `arena::getTicks()` |
+| `<arena/testing/fake.h>` | ネイティブ単体テスト用のフェイク制御 |
+
+| CMake ターゲット | 用途 |
+|---|---|
+| `arena_add_bot(<target> SOURCES ...)` | `.mjs` を生成する。**リンクフラグはすべてここに入っている** |
+| `arena::api` | 本物のブリッジ (WASM ビルド時) |
+| `arena::testing` | 同じ API をフェイクで実装 (ネイティブビルド時) |
+
+### JavaScript
+
+| import | 内容 |
+|---|---|
+| `screeps-arena-game-api-cpp/arena` | `createArenaEntry()` — Arena 用エントリ。`game/*` を import するので**実機でしか読めない** |
+| `screeps-arena-game-api-cpp/sim` | `createMatch()`, `World` — ローカル実行 |
+| `screeps-arena-game-api-cpp/rollup` | `arenaBundle()` — rollup 設定 |
+| `screeps-arena-game-api-cpp` | `createHost()`, `createBot()` — 低レベル |
+
+利用側が書くのはこれだけ:
+
+```js
+// js/main.mjs
+import { createArenaEntry } from 'screeps-arena-game-api-cpp/arena';
+import createArenaBot from '../dist/wasm/bot.mjs';
+
+export const loop = createArenaEntry(createArenaBot);
+```
 
 ---
 
 ## アーキテクチャ
 
 ```
-                  ┌─────────────────────────── Arena ランタイム ───┐
-  毎 tick         │  import { loop } from 'main.mjs'              │
-  ─────────────►  │  loop()                                       │
-                  └───────────────┬───────────────────────────────┘
+                  ┌────────────────────────── Arena ランタイム ───┐
+  毎 tick         │  import { loop } from 'main.mjs'             │
+  ─────────────►  │  loop()                                      │
+                  └───────────────┬──────────────────────────────┘
                                   │
-                     js/main.mjs  │  game/utils を import して host table を作る
+                    js/arena.mjs  │  game/utils を import して host table を作る
                                   ▼
                      js/host.mjs  ├── createHost({ utils })  ◄── 唯一の接続点
                                   │
                   js/runtime.mjs  │  WASM を同期的に instantiate
                                   ▼
                        ┌──────────────────── WASM ────────────────┐
-                       │  arena_loop()      cpp/entry/loop.cc     │
-                       │      └─ bot::loop()   cpp/bot/bot.cc     │
+                       │  arena_loop()        src/entry.cc        │
+                       │      └─ arena::loop()   あなたのコード   │
                        │            └─ arena::getTicks()          │
-                       │                  cpp/arena/utils_wasm.cc │
-                       │                  EM_JS ──────────────────┼──► Module.arena.getTicks()
+                       │                     src/utils_wasm.cc    │
+                       │                     EM_JS ───────────────┼──► Module.arena.getTicks()
                        └──────────────────────────────────────────┘
 ```
 
 **`js/host.mjs` の host table が唯一の接続点**であることが設計の要。
-本番 (`js/main.mjs`) は実 `game/*` を、シミュレータ (`sim/harness.mjs`) は
+本番 (`js/arena.mjs`) は実 `game/*` を、シミュレータ (`sim/harness.mjs`) は
 `sim/game/*` を同じ `createHost()` に渡す。
 配線が 1 箇所しかないので、シミュレータが本番から配線ミスで乖離することがない。
 
-C++ 側も同じ形になっている。`cpp/arena/utils.h` を宣言、実装が 2 つ:
+C++ 側も同じ形で、`include/arena/utils.h` の宣言に対し実装が 2 つ:
 
-- `cpp/arena/utils_wasm.cc` — EM_JS 経由の本物のブリッジ
-- `tests/fakes/arena_fake.cc` — ネイティブ単体テスト用のフェイク
+- `src/utils_wasm.cc` — EM_JS 経由の本物のブリッジ (`arena::api`)
+- `testing/fake.cc` — ネイティブ単体テスト用のフェイク (`arena::testing`)
 
-ボットのロジック (`cpp/bot/`) は Emscripten を一切知らないので、
+ボットのコードは Emscripten を一切知らないので、
 **Emscripten も Node も無しでネイティブにコンパイルして単体テストできる。**
 
-### ディレクトリ
+### なぜ npm で C++ ごと配るのか
 
-```
-cpp/arena/      Arena API の C++ 側ミラー (game/utils 相当)
-cpp/bot/        ボットのロジック。プラットフォーム非依存
-cpp/entry/      Arena が呼ぶ唯一のエクスポート arena_loop()
-js/             host table / WASM 起動 / Arena エントリポイント
-sim/            シミュレータ (world モデル + game/* のモック + ハーネス + E2E テスト)
-tests/          ネイティブ単体テスト (GoogleTest) とフェイク
-scripts/        emsdk のセットアップとラッパ
-dist/wasm/      CMake の出力 (bot.mjs, 単一ファイル)
-dist/main.mjs   デプロイする成果物 (rollup バンドル)
-```
-
----
-
-## セットアップ
-
-```sh
-npm install
-npm run setup      # third_party/emsdk に Emscripten 6.0.9 を入れる (初回のみ、数分)
-```
-
-`EMSDK` が既にシェルに設定されていればそちらが優先される (`scripts/with-emsdk.sh`)。
-
-必要なもの: Node 22+ (`node:module` の `registerHooks` を使う), CMake 3.25+, Ninja。
-macOS なら `brew install cmake ninja`。
-
----
-
-## コマンド
-
-| コマンド | 内容 |
-|---|---|
-| `npm run build` | WASM をビルド → `dist/wasm/bot.mjs` |
-| `npm run build:debug` | assertions + DWARF 付きでビルド |
-| `npm run bundle` | ビルド + rollup → `dist/main.mjs` (デプロイ成果物) |
-| `npm run sim` | ビルドしてシミュレータで実行 (`-- --ticks 5` で tick 数指定) |
-| `npm test` | C++ 単体テスト + シミュレータ E2E |
-| `npm run test:cpp` | ネイティブ単体テストのみ (Emscripten 不要、~1 秒) |
-| `npm run test:sim` | シミュレータ E2E のみ |
-| `npm run deploy` | `$ARENA_DIR/main.mjs` へコピー (既定は `~/ScreepsArena/season4-pain_and_gain`) |
-
-実行例:
-
-```console
-$ npm run sim -- --ticks 4
-[t   1] tick 1 (loop #1, previous 0)
-[t   2] tick 2 (loop #2, previous 1)
-[t   3] tick 3 (loop #3, previous 2)
-[t   4] tick 4 (loop #4, previous 3)
-
-ran 4 tick(s); API calls: {"getTicks":4}
-```
-
-`previous` が前 tick の値になっているのは、**WASM のヒープが tick をまたいで生存している**
-証拠。毎 tick 状態を作り直さなくていいことが、そもそも C++ で書く動機のひとつ。
+`EM_JS` の関数名と `host.mjs` のキーは一致していなければならない。
+C++ と JS を別経路 (FetchContent と npm など) で取得できるようにすると、
+**バージョンがずれた組み合わせが成立してしまい、誰も気づけない。**
+1 パッケージ 1 バージョンにすることで、この破綻を構造的に防いでいる。
 
 ---
 
 ## API を 1 つ増やす手順
 
-`getTicks` と同じ経路をなぞるだけ。4 箇所を触る:
+`getTicks` と同じ経路をなぞる。ライブラリ側で 5 箇所:
 
-1. **`cpp/arena/utils.h`** — 宣言を足す。名前は JS API と同一に (`getRange`, not `get_range`)
-2. **`cpp/arena/utils_wasm.cc`** — `EM_JS` でブリッジを書く
+1. **`include/arena/utils.h`** — 宣言。名前は JS API と同一に (`getRange`, not `get_range`)
+2. **`src/utils_wasm.cc`** — `EM_JS` でブリッジを書く
    ```cpp
    EM_JS(int, arena_js_getRange, (int ax, int ay, int bx, int by), {
      return Module["arena"]["getRange"]({x: ax, y: ay}, {x: bx, y: by});
    });
    ```
-3. **`js/host.mjs`** — host table に追加する
-4. **`sim/game/utils.mjs`** — シミュレータ側の実装を書く
-5. **`tests/fakes/arena_fake.cc`** — フェイクを足す (これが無いとネイティブテストがリンクできない)
+3. **`js/host.mjs`** — host table に追加
+4. **`sim/game/utils.mjs`** — シミュレータ側の実装
+5. **`testing/fake.cc`** — フェイクを足す
 
-5 の「リンクが壊れる」のは意図的な安全装置で、
-シミュレータとフェイクの更新忘れをビルドエラーとして検出する。
+5 を忘れるとネイティブテストが**リンクエラーになる**。これは意図的な安全装置で、
+シミュレータとフェイクの更新忘れをビルド時に検出する。
 
 ### オブジェクトを返す API について
 
@@ -164,83 +160,14 @@ ran 4 tick(s); API calls: {"getTicks":4}
 
 推奨は、tick の頭で必要な状態を **1 回だけ** WASM のリニアメモリへ書き出し、
 C++ は plain struct として読み、tick の終わりに intent のリストをまとめて返す形。
-`sim/world.mjs` の `apiCalls` カウンタは、この境界越え回数を数えるために置いてある。
-
----
-
-## ビルドフラグの根拠
-
-`CMakeLists.txt` の link options は、Arena ランタイムの制約から逆算して決めている。
-特に次の 2 つは**変えると壊れる**ので理由を残しておく。
-
-### `-sENVIRONMENT=shell` (`node` を足してはいけない)
-
-Emscripten が生成する factory は `async function` だが、
-`-sWASM_ASYNC_COMPILATION=0` と組み合わせると、**最初の `await` に到達する前に**
-`createWasm()` まで走り切り、エクスポートを渡したオブジェクトへ書き込む。
-つまり `createArenaBot(module)` が返った直後に `module._arena_loop` が既にある。
-
-ここに `node` を足すと、生成コードの先頭が
-
-```js
-if (ENVIRONMENT_IS_NODE) { const {createRequire} = await import("node:module"); ... }
-```
-
-になり、instantiate より先に `await` が入って同期性が壊れる。実測で確認済み。
-
-なぜ同期性にこだわるか: **`main.mjs` に top-level await を書きたくない**から。
-Arena のサンドボックスが top-level await を持つエントリモジュールをどう評価するかは
-こちらから検証できず、最初の数 tick を落とすボットは負ける。
-副次的な利点として、この構成では生成コードに `import.meta` も現れない
-(サンドボックスの互換性リスクが 1 つ減る)。
-
-### `-sSINGLE_FILE=1` + `-sSINGLE_FILE_BINARY_ENCODE=0`
-
-`.wasm` を `.mjs` に埋め込む。Arena は複数ファイルを受け付ける
-(コード合計 10MB まで) が、単一ファイルならバイナリの扱いを一切気にしなくて済む。
-現状の `dist/main.mjs` は **約 17KB**。
-
-`SINGLE_FILE_BINARY_ENCODE=0` が重要。Emscripten 6 の既定は base64 ではなく
-**独自のバイナリ文字列エンコーディング**で、約 25% 小さい代わりに
-「ファイルが UTF-8 として透過的に転送されること」を要求する (Emscripten 公式ドキュメント明記)。
-
-既定のままだと生成物は制御文字 2900 個超・非 ASCII 220 個を含む
-**バイナリファイル**になる。Arena の経路 —
-クライアントがファイル読込 → jszip → アップロード → サーバ → isolated-vm —
-はバイト透過を保証しない。1 バイト壊れれば起動時に `WebAssembly.CompileError` が出る。
-
-base64 なら純 ASCII。`sim/bundle.test.mjs` が `dist/main.mjs` の純 ASCII 性を
-アサートしているので、この危険が再発したらテストで落ちる。
-
-その他:
-
-- `-sINVOKE_RUN=0` — `main()` は無く、Arena が `loop()` を駆動する
-- `-sALLOW_MEMORY_GROWTH=0` / `-sINITIAL_MEMORY=16MB` — ヒープ拡張を
-  tick の CPU 予算に載せない。足りなくなったら growth ではなく初期値を上げる
-- **embind は使っていない** — 境界は引数も戻り値も無い `loop()` 1 本なので、
-  `EMSCRIPTEN_KEEPALIVE` のほうが小さく速い。複雑な型を渡す必要が出たら再検討する
-- WASM の instantiate は module scope で行う。Arena は最初の tick に
-  別枠の CPU 予算 (`arenaInfo.cpuTimeLimitFirstTick`) をくれるので、そこが適所
-
----
-
-## テストの二層構造
-
-| | 対象 | 速さ | 依存 |
-|---|---|---|---|
-| `tests/` (GoogleTest) | C++ のロジック | ~1 秒 | なし (ネイティブ) |
-| `sim/harness.test.mjs` | WASM ブリッジ + シミュレータ | ~0.1 秒 | ビルド済み WASM |
-| `sim/bundle.test.mjs` | **デプロイする `dist/main.mjs` そのもの** | ~0.1 秒 | rollup バンドル |
-
-`bundle.test.mjs` は Node の `module.registerHooks()` で `game/utils` を
-シミュレータへ解決させ、実際に配布するファイルを import して動かす。
-「開発時は動くがデプロイすると動かない」を潰すための層。
+`sim/world.mjs` の `apiCalls` カウンタと `arena::testing::getTicksCallCount()` は、
+この境界越え回数を数えるために置いてある。
 
 ---
 
 ## Arena サンドボックス (isolated-vm) について分かったこと
 
-実機のログから確定した事実。ドキュメントには書かれていない。
+実機のログから確定した事実。公式ドキュメントには書かれていない。
 
 ### WebAssembly は使える
 
@@ -252,8 +179,7 @@ compile an empty module: ok
 reserve 256 pages (16MB): ok
 ```
 
-**この方式は成立する。** WASM は存在し、コード生成も禁止されておらず、
-16MB のヒープ確保も通る。実際に 2000 tick 完走している。
+**この方式は成立する。** 実際に 2000 tick 完走している。
 
 ### console は `log()` しか無い
 
@@ -272,7 +198,7 @@ Arena は `print` を定義しないので補完が丸ごとスキップされ�
 Module 経由の指定では間に合わない。
 
 `js/runtime.mjs` の `ensureConsoleMethods()` がインスタンス化前に欠けを埋める。
-`sim/harness.test.mjs` に「`log()` だけの console」「凍結された console」の
+`tests/harness.test.mjs` に「`log()` だけの console」「凍結された console」の
 2 ケースを置いてある (シムを外すと両方落ちることを確認済み)。
 
 ### モジュール評価中の console 出力は試合ログに出ない
@@ -281,22 +207,64 @@ tick が書いたものだけが届く。診断は必ず `loop()` から出す�
 
 ---
 
+## ビルドフラグの根拠
+
+`cmake/ArenaBot.cmake` のリンクオプションは、いずれも実機での失敗から逆算している。
+特に次の 2 つは**変えると壊れる**。
+
+### `-sENVIRONMENT=shell` (`node` を足してはいけない)
+
+Emscripten が生成する factory は `async function` だが、
+`-sWASM_ASYNC_COMPILATION=0` と組み合わせると、**最初の `await` に到達する前に**
+`createWasm()` まで走り切り、エクスポートを渡したオブジェクトへ書き込む。
+つまり `createArenaBot(module)` が返った直後に `module._arena_loop` が既にある。
+
+ここに `node` を足すと、生成コードの先頭が
+
+```js
+if (ENVIRONMENT_IS_NODE) { const {createRequire} = await import("node:module"); ... }
+```
+
+になり、instantiate より先に `await` が入って同期性が壊れる。実測で確認済み。
+
+なぜ同期性にこだわるか: **エントリに top-level await を書きたくない**から。
+Arena のサンドボックスが top-level await を持つエントリモジュールをどう評価するかは
+こちらから検証できず、最初の数 tick を落とすボットは負ける。
+副次的な利点として、この構成では生成コードに `import.meta` も現れない。
+
+### `-sSINGLE_FILE=1` + `-sSINGLE_FILE_BINARY_ENCODE=0`
+
+`.wasm` を `.mjs` に埋め込む。Arena は複数ファイルを受け付ける
+(コード合計 10MB まで) が、単一ファイルならバイナリの扱いを気にしなくて済む。
+
+`SINGLE_FILE_BINARY_ENCODE=0` が重要。Emscripten 6 の既定は base64 ではなく
+**独自のバイナリ文字列エンコーディング**で、約 25% 小さい代わりに
+「ファイルが UTF-8 として透過的に転送されること」を要求する (公式ドキュメント明記)。
+
+既定のままだと生成物は制御文字 2900 個超を含む**バイナリファイル**になる。
+Arena の経路 — クライアントがファイル読込 → jszip → アップロード → サーバ →
+isolated-vm — はバイト透過を保証しない。1 バイト壊れれば起動時に
+`WebAssembly.CompileError` が出る。
+
+base64 なら純 ASCII。`tests/external/consume.test.mjs` が
+生成された `dist/main.mjs` の純 ASCII 性をアサートしている。
+
+その他:
+
+- `-sINVOKE_RUN=0` — `main()` は無く、Arena が `loop()` を駆動する
+- `-sALLOW_MEMORY_GROWTH=0` / `-sINITIAL_MEMORY=16MB` — ヒープ拡張を
+  tick の CPU 予算に載せない。足りなくなったら growth ではなく初期値を上げる
+- **embind は使っていない** — 境界は引数も戻り値も無い `loop()` 1 本なので、
+  `EMSCRIPTEN_KEEPALIVE` のほうが小さく速い
+
+---
+
 ## 起動に失敗したときの読み方
 
 `js/runtime.mjs` は**原因を推測せず、ランタイムが言ったことをそのまま出す**。
 Emscripten の factory は `async` なので、instantiate 中の例外は throw ではなく
-**Promise の reject** として届く。
-
-### 診断ログは必ず tick から出す
-
-実機で判明した重要な性質: **Arena はモジュール評価中の console 出力を
-試合ログに出さない。**tick が書いたものだけが届く。
-
-そのため `createBot()` はモジュール評価時には何も報告せず、
-失敗を握っておいて**最初の tick で**まとめて出す。
-ここを間違えると「何かが失敗したことだけ分かって理由が分からない」状態になる。
-
-### 出力例
+Promise の reject として届く。診断は必ず `loop()` から出す (上記の通り、
+モジュール評価中の出力は試合ログに届かない)。
 
 ```
 [wasm] instantiation failed: CompileError: WebAssembly.Module(): ...
@@ -307,21 +275,18 @@ Emscripten の factory は `async` なので、instantiate 中の例外は throw
 ```
 
 1 行目が要約、続く `[wasm]   ` 付きがランタイムへのプローブ、最後がスタック。
-コンソールが長い行を切っても、要約とプローブは残るこの順序にしてある。
+コンソールが長い行を切っても要約とプローブは残るこの順序にしてある。
 
-プローブの読み方:
-
-| 出力 | 意味 |
+| プローブ出力 | 意味 |
 |---|---|
 | `typeof WebAssembly = undefined` | サンドボックスに WASM が無い。この方式自体が成立しない |
-| `compile an empty module:` が失敗 | WASM はあるがコード生成が embedder に禁止されている (`--jitless` 等)。8 バイトの空モジュールすら通らないので、こちらのコードの問題ではない |
+| `compile an empty module:` が失敗 | WASM はあるがコード生成が embedder に禁止されている。8 バイトの空モジュールすら通らないので、こちらのコードの問題ではない |
 | `reserve 256 pages (16MB):` が失敗 | isolate のメモリ上限。`-sINITIAL_MEMORY` を下げる |
-| プローブが全部 `ok` | ランタイムは正常。1 行目のエラーがこちらの成果物の問題 |
+| 全部 `ok` | ランタイムは正常。1 行目のエラーがこちらの成果物の問題 |
 
-プローブが全部 `ok` のときの 1 行目の読み方:
+全部 `ok` のときの 1 行目の読み方:
 
-- `CompileError` → 埋め込みペイロードの破損。
-  `npm run test:sim` の純 ASCII アサートを確認する
+- `CompileError` → 埋め込みペイロードの破損。純 ASCII アサートを確認する
 - `TypeError: Cannot read properties of undefined (reading 'bind')` →
   サンドボックスに欠けている console メソッドがある。
   `ensureConsoleMethods()` の `REQUIRED_CONSOLE_METHODS` に足す
@@ -331,14 +296,60 @@ Emscripten の factory は `async` なので、instantiate 中の例外は throw
 
 ---
 
-## 未確認事項
+## このリポジトリの開発
 
-実機で 2000 tick 完走したので、方式の成立自体はもう未確認事項ではない。
-残っているのは性能まわり。
+```
+include/arena/   公開ヘッダ
+src/             WASM ブリッジと エントリポイント
+testing/         ネイティブテスト用フェイク (arena::testing)
+cmake/           arena_add_bot() — 公開 CMake API
+js/              host table / WASM 起動 / Arena エントリ / rollup ヘルパ
+sim/             シミュレータ (world モデル + game/* のモック + ハーネス)
+scripts/         emsdk のセットアップとラッパ
+template/        テンプレート 兼 外部利用テストの対象
+tests/           このライブラリ自身のテスト
+```
 
-- **WASM 起動の実 CPU コスト**は未計測。
-  2000 tick 完走したので予算内には収まっているが、初回 tick で
-  どれだけ使っているかは測っていない。`getCpuTime()` を生やせば分かる。
-- **JS↔WASM 境界 1 回あたりのコスト**も未計測。
-  現状は tick あたり `getTicks()` の 1 回だけ。本格的な API を生やす前に
-  ここを測っておかないと、スナップショット方式に切り替える判断ができない。
+| コマンド | 内容 |
+|---|---|
+| `npm test` | 下記 3 つすべて |
+| `npm run test:cpp` | ネイティブ単体テスト (Emscripten 不要、~1 秒) |
+| `npm run test:sim` | WASM ブリッジ + シミュレータ |
+| `npm run test:external` | **`template/` を実際にビルドして検証** (~8 秒) |
+
+`test:external` が要。`npm pack` した tarball を `template/` のコピーへ
+install し、CMake でビルドしてシミュレータまで走らせる。
+これだけが検出できるもの:
+
+- `package.json` の `files` にヘッダを入れ忘れた
+- `exports` の解決が壊れた
+- `arena_add_bot()` がこのリポジトリの中でしか動かない
+- 生成された `dist/main.mjs` が純 ASCII でない
+
+`template/` は**テンプレートであると同時にこのテストの対象**なので、
+テンプレートが壊れたら CI が落ちる。テンプレートが腐らない。
+
+---
+
+## テンプレートを別リポジトリとして公開する
+
+```sh
+git subtree split --prefix template -b template-only
+git push git@github.com:arukuka/screeps-arena-cpp-template.git template-only:main
+```
+
+GitHub 側で Settings → "Template repository" を有効にする。
+`template/package.json` の依存は既に
+`github:arukuka/screeps-arena-game-api-cpp` を指しているので、
+push 後はそのまま `npm install` できる。
+
+---
+
+## 未計測
+
+方式の成立自体は実機で確認済み。残っているのは性能。
+
+- **WASM 起動の実 CPU コスト**。2000 tick 完走したので予算内には収まっているが、
+  初回 tick でどれだけ使っているかは測っていない。`getCpuTime()` を生やせば分かる
+- **JS↔WASM 境界 1 回あたりのコスト**。本格的な API を生やす前にここを測らないと、
+  スナップショット方式へ切り替える判断ができない

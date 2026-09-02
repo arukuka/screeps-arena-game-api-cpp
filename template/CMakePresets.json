@@ -1,0 +1,39 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "wasm",
+      "displayName": "WASM (Emscripten) -- the artifact deployed to the Arena",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/wasm",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "wasm-debug",
+      "inherits": "wasm",
+      "displayName": "WASM with assertions and DWARF",
+      "binaryDir": "${sourceDir}/build/wasm-debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "native",
+      "displayName": "Native -- C++ unit tests, no Emscripten needed",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/native",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "wasm", "configurePreset": "wasm" },
+    { "name": "wasm-debug", "configurePreset": "wasm-debug" },
+    { "name": "native", "configurePreset": "native" }
+  ],
+  "testPresets": [
+    {
+      "name": "native",
+      "configurePreset": "native",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

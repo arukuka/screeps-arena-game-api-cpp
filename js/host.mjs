@@ -1,8 +1,8 @@
 /**
  * The host table: the one place that maps the Screeps: Arena JS API onto the
- * names the WASM module calls (see `cpp/arena/utils_wasm.cc`).
+ * names the WASM module calls (see `src/utils_wasm.cc`).
  *
- * Both entry points go through here -- `js/main.mjs` passes the real `game/*`
+ * Both entry points go through here -- `js/arena.mjs` passes the real `game/*`
  * modules, `sim/harness.mjs` passes the simulated ones -- so the simulator
  * cannot drift from production by wiring something up differently.
  */

@@ -1,8 +1,21 @@
-# Native unit tests for the bot logic.
+# The library's own tests.
 #
-# `arena_fake.cc` provides the same symbols `cpp/arena/utils_wasm.cc` does, so
-# the bot links against a fake game and runs on the host — no Emscripten, no
-# Node, no WASM. Use these for logic; use `sim/*.test.mjs` for the bridge.
+# Two builds from one set of sources:
+#
+#   wasm   -- compiles tests/fixtures/probe_bot.cc through arena_add_bot(), the
+#             same public entry point a consumer uses, and leaves the .mjs where
+#             the JS tests can load it
+#   native -- compiles the same fixture against arena::testing and runs it under
+#             GoogleTest, with no Emscripten in sight
+
+if(EMSCRIPTEN)
+  arena_add_bot(probe_bot
+    SOURCES fixtures/probe_bot.cc
+    OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/fixtures"
+  )
+  target_include_directories(probe_bot PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  return()
+endif()
 
 include(FetchContent)
 
@@ -22,13 +35,13 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   target_compile_options(gtest PRIVATE -Wno-character-conversion)
 endif()
 
-add_executable(bot_test
-  bot_test.cc
-  fakes/arena_fake.cc
+add_executable(probe_bot_test
+  probe_bot_test.cc
+  fixtures/probe_bot.cc
 )
-target_include_directories(bot_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_compile_options(bot_test PRIVATE -Wall -Wextra -Wpedantic)
-target_link_libraries(bot_test PRIVATE bot_logic GTest::gtest_main)
+target_include_directories(probe_bot_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_options(probe_bot_test PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(probe_bot_test PRIVATE arena::testing GTest::gtest_main)
 
 include(GoogleTest)
-gtest_discover_tests(bot_test)
+gtest_discover_tests(probe_bot_test)

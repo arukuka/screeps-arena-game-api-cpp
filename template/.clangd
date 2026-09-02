@@ -1,0 +1,5 @@
+# clangd reads the WASM build's compile database, so headers resolve against
+# the Emscripten sysroot -- the same way the deployed artifact is compiled.
+# Run `npm run build` once to generate it.
+CompileFlags:
+  CompilationDatabase: build/wasm
