@@ -107,5 +107,11 @@ CMakeLists.txt        arena_add_bot() を呼ぶだけ
 何が未実装かは `node_modules/screeps-arena-game-api-cpp/sim/FIDELITY.md` に書いてある。
 細部を詰める前に読むこと。
 
-API の増やし方・ビルドフラグの根拠・Arena サンドボックスの癖については
-[ライブラリ側の README](https://github.com/arukuka/screeps-arena-game-api-cpp) を参照。
+ライブラリ側のドキュメント（[screeps-arena-game-api-cpp](https://github.com/arukuka/screeps-arena-game-api-cpp)）:
+
+- [docs/ARENA-RUNTIME.md](https://github.com/arukuka/screeps-arena-game-api-cpp/blob/main/docs/ARENA-RUNTIME.md)
+  — Arena サンドボックスの癖、ビルドフラグの根拠、**起動に失敗したときの読み方**
+- [docs/DESIGN.md](https://github.com/arukuka/screeps-arena-game-api-cpp/blob/main/docs/DESIGN.md)
+  — 定数の扱い、オブジェクト表現の選択
+- [docs/CONTRIBUTING.md](https://github.com/arukuka/screeps-arena-game-api-cpp/blob/main/docs/CONTRIBUTING.md)
+  — API の増やし方
