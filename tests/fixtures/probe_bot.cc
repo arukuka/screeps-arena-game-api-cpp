@@ -23,8 +23,7 @@ void loop() {
   // `g_lastTick` is still the previous call's tick here, and is 0 before the
   // first call. Printing it is what proves the heap survived between ticks.
   // Routed to the Arena console by js/runtime.mjs.
-  std::printf("tick %d (loop #%d, previous %d)\n", tick, g_loopCount,
-              g_lastTick);
+  std::printf("tick %d (loop #%d, previous %d)\n", tick, g_loopCount, g_lastTick);
 
   g_lastTick = tick;
 }

@@ -61,7 +61,13 @@ ARENA_DIR=~/ScreepsArena/season4-pain_and_gain npm run deploy
 | ヘッダ | 内容 |
 |---|---|
 | `<arena/bot.h>` | `arena::loop()` の**宣言のみ**。あなたが実装する。忘れるとリンクエラーになる |
-| `<arena/utils.h>` | `game/utils` のミラー。現状 `arena::getTicks()` |
+| `<arena/utils.h>` | `game/utils` のミラー。`getObjectsByPrototype<Creep>()` など |
+| `<arena/prototypes.h>` | `Creep` / `StructureSpawn` / `StructureTower` ほか全プロトタイプ |
+| `<arena/constants.h>` | `game/constants` 全定数 + 実測値 |
+| `<arena/types.h>` | `Position` / `getRange()` など。**JS に触れないのでネイティブでも使える** |
+| `<arena/path_finder.h>` | `searchPath()` / `CostMatrix` |
+| `<arena/visual.h>` | `Visual` |
+| `<arena/arena.h>` | 上記すべて |
 | `<arena/testing/fake.h>` | ネイティブ単体テスト用のフェイク制御 |
 
 | CMake ターゲット | 用途 |
@@ -124,8 +130,42 @@ C++ 側も同じ形で、`include/arena/utils.h` の宣言に対し実装が 2 �
 - `src/utils_wasm.cc` — EM_JS 経由の本物のブリッジ (`arena::api`)
 - `testing/fake.cc` — ネイティブ単体テスト用のフェイク (`arena::testing`)
 
-ボットのコードは Emscripten を一切知らないので、
-**Emscripten も Node も無しでネイティブにコンパイルして単体テストできる。**
+### オブジェクトは `emscripten::val` ハンドル
+
+ゲームオブジェクトは JS オブジェクトへの薄いラッパで、
+**プロパティ読み取りのたびに JS 境界を越える**。そのため JS の
+プロパティは C++ では**メソッド**になっている (`creep.hits()`)。
+コストが呼び出し側から見えるようにするための意図的な差異。
+
+```cpp
+for (const Creep& creep : getObjectsByPrototype<Creep>()) {
+  if (!creep.my()) continue;                        // 境界を越える
+  if (creep.harvest(source) == ERR_NOT_IN_RANGE) {  // 境界を越える
+    creep.moveTo(source.pos());
+  }
+}
+```
+
+Arena は tick あたりの実時間 CPU で課金される。ホットループで同じ
+プロパティを何度も読むならローカルに退避すること。
+
+### ネイティブテストで見えるもの / 見えないもの
+
+`emscripten::val` にホスト側の等価物は無い。したがって:
+
+| | ネイティブ | WASM |
+|---|---|---|
+| `constants.h` / `types.h` (`getRange` など) | ✅ | ✅ |
+| `getTicks` / `getCpuTime` / `getTerrainAt` / `getDirection` | ✅ (`arena::testing` がフェイク) | ✅ |
+| オブジェクトモデル全般 | ❌ | ✅ |
+
+つまり**ゲームオブジェクトを読むコードはネイティブでテストできない。**
+`template/` はこれに対する書き方を示している:
+
+- `src/strategy.cc` — plain data 上の判断。ネイティブで 1 秒テスト
+- `src/bot.cc` — ゲームを読み、strategy を呼び、行動を出すだけの薄い層
+
+判断を strategy 側に寄せるほど、速いループでテストできる範囲が広がる。
 
 ### なぜ npm で C++ ごと配るのか
 
@@ -149,10 +189,11 @@ C++ と JS を別経路 (FetchContent と npm など) で取得できるよう�
    ```
 3. **`js/host.mjs`** — host table に追加
 4. **`sim/game/utils.mjs`** — シミュレータ側の実装
-5. **`testing/fake.cc`** — フェイクを足す
+5. **`testing/fake.cc`** — スカラー API ならフェイクを足す
 
-5 を忘れるとネイティブテストが**リンクエラーになる**。これは意図的な安全装置で、
-シミュレータとフェイクの更新忘れをビルド時に検出する。
+定数を足すときは `tests/constants.test.mjs` が
+`include/arena/constants.h` と `sim/game/constants.mjs` を突き合わせるので、
+片方だけ直すとテストが落ちる。
 
 ### オブジェクトを返す API について
 
@@ -160,10 +201,56 @@ C++ と JS を別経路 (FetchContent と npm など) で取得できるよう�
 **1 個ずつ EM_JS で読むのは避けたほうがいい。** Arena は tick あたりの
 実時間 CPU (`arenaInfo.cpuTimeLimit`) で課金され、JS↔WASM の往復はそこに直接効く。
 
-推奨は、tick の頭で必要な状態を **1 回だけ** WASM のリニアメモリへ書き出し、
-C++ は plain struct として読み、tick の終わりに intent のリストをまとめて返す形。
+現状は `emscripten::val` ハンドル方式を採っている。JS API と 1:1 で読みやすい
+代わりに、プロパティ 1 つにつき 1 往復する。creep 50 体を本格的に回す段階で
+CPU が問題になったら、tick 頭に状態を 1 回だけ WASM のリニアメモリへ書き出す
+スナップショット方式への移行を検討すること。
+
 `sim/world.mjs` の `apiCalls` カウンタと `arena::testing::getTicksCallCount()` は、
-この境界越え回数を数えるために置いてある。
+その判断のために境界越え回数を数える道具として置いてある。
+
+---
+
+## 定数の扱い
+
+`include/arena/constants.h` は **推測しない**。
+
+- typings に値があるもの → そのまま転記
+- typings に型しか無いが実機で測ったもの (`BODYPART_COST`,
+  `rangedMassAttackRate`, `SPAWN_ENERGY_REGEN`, 疲労まわり) →
+  **測定方法をコメントに残して**定義
+- 値も測定も無いもの (`OBSTACLE_OBJECT_TYPES`, `RESOURCES_ALL`,
+  `CONSTRUCTION_COST`) → **定義しない**。
+  `arena::obstacleObjectTypes()` などで実機から読む
+
+`getDirection()` も同じ理由で C++ 実装していない。Chebyshev 距離
+(`getRange`) は確実なので C++ で計算するが、任意の delta を 8 方向へ
+丸める規則はゲーム側の仕様であり、推測すると静かに間違った移動をする。
+
+実測値の出所は arukuka/screeps-arena-bot `src/constants.ts`。
+
+---
+
+## シミュレータ
+
+簡易エンジンを実装してある。移動 (疲労・衝突)、戦闘 (近接・遠隔・
+mass attack・回復・タワー)、採掘、建設、資源の受け渡し、スポーンを解決する。
+
+```js
+const world = new World({ width: 20, height: 20 });
+world.addCreep({ id: 'c1', my: true, x: 5, y: 5, body: ['move', 'work', 'carry'] });
+world.addSource({ id: 's1', x: 6, y: 5, energy: 3000 });
+
+const match = createMatch({ createArenaBot, world });
+match.run(10);
+
+assert.equal(world.creep('c1').store.energy, 20);
+```
+
+**これは近似であって実機エンジンではない。**
+何が実測に基づき、何が Screeps World からの推定で、何が実装されていないかは
+[`sim/FIDELITY.md`](sim/FIDELITY.md) に全部書いてある。
+細部を詰める前に必ず読むこと。
 
 ---
 
@@ -316,7 +403,7 @@ tests/           このライブラリ自身のテスト
 |---|---|
 | `npm test` | 下記 3 つすべて |
 | `npm run test:cpp` | ネイティブ単体テスト (Emscripten 不要、~1 秒) |
-| `npm run test:sim` | WASM ブリッジ + シミュレータ |
+| `npm run test:sim` | 定数の突き合わせ + エンジン + WASM ブリッジ |
 | `npm run test:external` | **`template/` を実際にビルドして検証** (~8 秒) |
 
 `test:external` が要。`npm pack` した tarball を `template/` のコピーへ

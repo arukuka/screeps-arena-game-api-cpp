@@ -39,6 +39,10 @@ function(arena_add_bot target)
   )
 
   target_link_options(${target} PRIVATE
+    # --- embind, for emscripten::val ---
+    # The game object model holds JS handles, so the bot needs val at runtime.
+    --bind
+
     # --- shape of the generated glue ---
     -sMODULARIZE=1              # export a factory instead of touching globals
     -sEXPORT_ES6=1              # ...as an ES module, like the Arena expects

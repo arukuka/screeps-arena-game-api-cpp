@@ -8,8 +8,14 @@
 
 import { createBot, createHost } from '../js/index.mjs';
 
+import { beginTick, endTick } from './engine.mjs';
 import { setWorld } from './game/_current.mjs';
+import * as constants from './game/constants.mjs';
+import { arenaInfo } from './game/index.mjs';
+import * as pathFinder from './game/path-finder.mjs';
+import * as prototypes from './game/prototypes.mjs';
 import * as utils from './game/utils.mjs';
+import * as visual from './game/visual.mjs';
 import { World } from './world.mjs';
 
 /**
@@ -18,7 +24,6 @@ import { World } from './world.mjs';
  *   the Emscripten factory from your `arena_add_bot()` output
  * @param {World}  [options.world]  the world to run against
  * @param {(text: string, tick: number) => void} [options.onLog]
- *   called for every console line the bot emits, as it is emitted
  * @returns {{ world: World, logs: string[], runTick(): void, run(ticks: number): void }}
  */
 export function createMatch({ createArenaBot, world = new World(), onLog }) {
@@ -33,7 +38,10 @@ export function createMatch({ createArenaBot, world = new World(), onLog }) {
 
   // A fresh WASM instance per match. The heap persists across the ticks of one
   // match and nothing leaks into the next, which is what the Arena does too.
-  const bot = createBot(createArenaBot, createHost({ utils, log }));
+  const bot = createBot(
+    createArenaBot,
+    createHost({ utils, prototypes, constants, pathFinder, visual, arenaInfo, log }),
+  );
 
   return {
     world,
@@ -43,8 +51,9 @@ export function createMatch({ createArenaBot, world = new World(), onLog }) {
       // Re-bound every tick so two matches can be interleaved in one process,
       // the way mirrored evaluation needs.
       setWorld(world);
+      beginTick(world);
       bot.loop();
-      world.advance();
+      endTick(world);
     },
 
     run(ticks) {

@@ -1,8 +1,12 @@
-/** Simulated `game` — the barrel the real runtime also exposes. */
+/** Simulated `game` -- the barrel the real runtime also exposes. */
 
 import { world } from './_current.mjs';
 
 export * from './utils.mjs';
+export * from './prototypes.mjs';
+export * from './constants.mjs';
+export * from './path-finder.mjs';
+export * from './visual.mjs';
 
 /**
  * `arenaInfo` is a live binding in the real API. A getter keeps it live here

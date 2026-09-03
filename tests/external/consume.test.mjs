@@ -21,7 +21,15 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 
 const REPO = fileURLToPath(new URL('../..', import.meta.url));
-const SIM_UTILS = new URL('../../sim/game/utils.mjs', import.meta.url).href;
+/** The `game/*` specifiers the bundle imports, mapped onto the simulator. */
+const SIM_MODULES = {
+  game: new URL('../../sim/game/index.mjs', import.meta.url).href,
+  'game/utils': new URL('../../sim/game/utils.mjs', import.meta.url).href,
+  'game/prototypes': new URL('../../sim/game/prototypes.mjs', import.meta.url).href,
+  'game/constants': new URL('../../sim/game/constants.mjs', import.meta.url).href,
+  'game/path-finder': new URL('../../sim/game/path-finder.mjs', import.meta.url).href,
+  'game/visual': new URL('../../sim/game/visual.mjs', import.meta.url).href,
+};
 
 // Emscripten builds and an npm install; nowhere near the default 30s.
 const TIMEOUT_MS = 10 * 60 * 1000;
@@ -84,7 +92,7 @@ describe('consuming the published package', { timeout: TIMEOUT_MS }, () => {
     assert.match(output, /100% tests passed out of 1/, output);
 
     // ...and on the template's own sim suite, which drives the compiled WASM.
-    assert.match(output, /reads the tick counter through the WASM boundary/, output);
+    assert.match(output, /reads the game through the WASM boundary/, output);
     assert.match(output, /^\u2139 fail 0$/m, output);
   });
 
@@ -107,16 +115,17 @@ describe('consuming the published package', { timeout: TIMEOUT_MS }, () => {
   });
 
   it('runs the bundled artifact against the simulator', async () => {
-    const { setWorld } = await import('../../sim/index.mjs');
-    const { World } = await import('../../sim/world.mjs');
+    const { setWorld, World } = await import('../../sim/index.mjs');
+    const { beginTick, endTick } = await import('../../sim/engine.mjs');
 
     // Stands in for the Arena runtime, which resolves bare `game/*` specifiers
     // to its own built-in modules.
     const hooks = registerHooks({
       resolve(specifier, context, next) {
-        return specifier === 'game/utils'
-          ? { url: SIM_UTILS, shortCircuit: true }
-          : next(specifier, context);
+        const simulated = SIM_MODULES[specifier];
+        return simulated === undefined
+          ? next(specifier, context)
+          : { url: simulated, shortCircuit: true };
       },
     });
 
@@ -125,7 +134,9 @@ describe('consuming the published package', { timeout: TIMEOUT_MS }, () => {
     console.log = (text) => lines.push(text);
 
     try {
-      const world = new World();
+      const world = new World({ width: 20, height: 20 });
+      world.addCreep({ id: 'c1', my: true, x: 5, y: 5, body: ['move', 'work', 'carry'] });
+      world.addSource({ id: 's1', x: 6, y: 5, energy: 3000 });
       setWorld(world);
 
       // Imported inside the test: the bundle instantiates the WASM at module
@@ -133,14 +144,15 @@ describe('consuming the published package', { timeout: TIMEOUT_MS }, () => {
       const { loop } = await import(join(project, 'dist', 'main.mjs'));
 
       for (let tick = 0; tick < 3; tick += 1) {
+        beginTick(world);
         loop();
-        world.advance();
+        endTick(world);
       }
 
       assert.deepEqual(lines, [
-        'hello from C++: tick 1 (loop #1)',
-        'hello from C++: tick 2 (loop #2)',
-        'hello from C++: tick 3 (loop #3)',
+        'tick 1: 1 creeps, 1 harvests so far',
+        'tick 2: 1 creeps, 2 harvests so far',
+        'tick 3: 1 creeps, 3 harvests so far',
       ]);
     } finally {
       console.log = originalLog;

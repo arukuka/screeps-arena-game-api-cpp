@@ -1,12 +1,17 @@
 /**
  * The Arena-side entry point.
  *
- * Importing this module pulls in `game/utils`, which only exists inside the
- * Arena runtime -- so nothing under `sim/` may import it, and neither may any
- * code you want to run locally.
+ * Importing this module pulls in `game/*`, which only exists inside the Arena
+ * runtime -- so nothing under `sim/` may import it, and neither may any code
+ * you want to run locally.
  */
 
-import { getTicks } from 'game/utils';
+import * as constants from 'game/constants';
+import * as pathFinder from 'game/path-finder';
+import * as prototypes from 'game/prototypes';
+import * as utils from 'game/utils';
+import * as visual from 'game/visual';
+import { arenaInfo } from 'game';
 
 import { createHost } from './host.mjs';
 import { createBot } from './runtime.mjs';
@@ -28,6 +33,9 @@ import { createBot } from './runtime.mjs';
  * @returns {() => void} the function to export as `loop`
  */
 export function createArenaEntry(createArenaBot) {
-  const bot = createBot(createArenaBot, createHost({ utils: { getTicks } }));
+  const bot = createBot(
+    createArenaBot,
+    createHost({ utils, prototypes, constants, pathFinder, visual, arenaInfo }),
+  );
   return () => bot.loop();
 }

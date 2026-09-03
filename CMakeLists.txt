@@ -29,7 +29,7 @@ if(EMSCRIPTEN)
   # -------------------------------------------------------------------------
   # arena::api -- the real bridge. Link this to talk to the game.
   # -------------------------------------------------------------------------
-  add_library(arena_api STATIC src/utils_wasm.cc)
+  add_library(arena_api STATIC src/bridge.cc)
   add_library(arena::api ALIAS arena_api)
   target_link_libraries(arena_api PUBLIC arena::headers)
   target_compile_options(arena_api PRIVATE -Wall -Wextra -Wpedantic)

@@ -2,17 +2,23 @@
  * The local simulator.
  *
  * Runs a compiled bot against a simulated game API, so the whole path --
- * C++ -> EM_JS -> host table -> `game/*` -- is exercised without deploying.
+ * C++ -> emscripten::val -> host table -> `game/*` -- is exercised without
+ * deploying.
  *
  *   import createArenaBot from '../dist/wasm/bot.mjs';
- *   import { createMatch } from 'screeps-arena-game-api-cpp/sim';
+ *   import { World, createMatch } from 'screeps-arena-game-api-cpp/sim';
  *
- *   const match = createMatch({ createArenaBot });
+ *   const world = new World();
+ *   world.addCreep({ id: 'c1', my: true, x: 5, y: 5, body: ['move', 'work'] });
+ *
+ *   const match = createMatch({ createArenaBot, world });
  *   match.run(10);
  *
- * `sim/game/*` is reachable too, for tests that want to drive the API directly.
+ * The engine that resolves what the bot asked for is an approximation; see
+ * `sim/FIDELITY.md` for what is known to differ from the real one.
  */
 
 export { createMatch } from './harness.mjs';
 export { DEFAULT_ARENA_INFO, World } from './world.mjs';
+export { beginTick, endTick } from './engine.mjs';
 export { setWorld } from './game/_current.mjs';

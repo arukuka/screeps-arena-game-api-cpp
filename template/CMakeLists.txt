@@ -11,7 +11,7 @@ add_subdirectory(node_modules/screeps-arena-game-api-cpp arena-cpp)
 
 if(EMSCRIPTEN)
   # Produces dist/wasm/bot.mjs, which js/main.mjs and sim/run.mjs both load.
-  arena_add_bot(bot SOURCES src/bot.cc)
+  arena_add_bot(bot SOURCES src/bot.cc src/strategy.cc)
 else()
   # Native build: the same bot source, linked against fakes instead of the
   # game, so unit tests run in about a second with no Emscripten involved.
