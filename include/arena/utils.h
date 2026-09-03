@@ -152,7 +152,16 @@ struct ArenaInfo {
   std::string season;
   int level = 0;
   int ticksLimit = 0;
+
+  /// Per-tick CPU allowance, in **nanoseconds** -- the same unit
+  /// `getCpuTime()` reports, so the two can be compared directly.
+  ///
+  /// The typings give no unit. Measured on Pain and Gain, where the raw value
+  /// is 1e8: 100 ms read as nanoseconds, and absurd read as anything else.
   double cpuTimeLimit = 0;
+
+  /// The larger allowance for the first tick, also in nanoseconds. Observed as
+  /// 1e9, i.e. one second -- which is where compiling the WASM belongs.
   double cpuTimeLimitFirstTick = 0;
 };
 

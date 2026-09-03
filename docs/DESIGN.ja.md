@@ -48,8 +48,12 @@ creep 50 体を本格的に回す段階で CPU が問題になったら、tick �
 **1 回だけ** WASM のリニアメモリへ書き出すスナップショット方式への移行を
 検討すること。
 
-`sim/world.mjs` の `apiCalls` カウンタと `arena::testing::getTicksCallCount()` は、
-その判断のために境界越え回数を数える道具として置いてある。
+`sim/world.mjs` の `apiCalls` カウンタと `arena::testing::getTicksCallCount()` は
+境界越えの回数を数える道具で、1 回のコストは `bench/` で測ってある。
+Pain and Gain での数値は、ハンドル経由のプロパティ読み取りが約 1.8 マイクロ秒、
+同じフィールドが WASM メモリにあれば 0.45 ナノ秒、tick 予算は 100ms。
+注目すべきは、サンドボックスが**境界越えの回数**に課金している点で、
+一括の `getObjectsByPrototype()` は Node と変わらない。
 
 移行するとオブジェクトのプロパティは struct のフィールドになり、
 行動の戻り値をその tick で得られなくなる (`ERR_NOT_IN_RANGE` を見て分岐する

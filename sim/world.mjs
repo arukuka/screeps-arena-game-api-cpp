@@ -42,8 +42,12 @@ export const DEFAULT_ARENA_INFO = Object.freeze({
   season: 'local',
   level: 1,
   ticksLimit: 2000,
-  cpuTimeLimit: 50,
-  cpuTimeLimitFirstTick: 500,
+  // Nanoseconds, matching getCpuTime(). These were milliseconds until the
+  // benchmark was run on Pain and Gain and printed a nonsense figure: the real
+  // arenaInfo reports 1e8 and 1e9, which are 100 ms and 1 s as nanoseconds and
+  // absurd as anything else. The typings state no unit.
+  cpuTimeLimit: 100_000_000,
+  cpuTimeLimitFirstTick: 1_000_000_000,
 });
 
 let autoId = 0;

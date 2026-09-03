@@ -13,70 +13,92 @@ npm run bench                # 50 creeps
 npm run bench -- --creeps 5
 ```
 
-## Reading the output
+## Measured on the real game
+
+Pain and Gain, 28 creeps. A "pass" is 28 creeps x 5 fields, so 140 reads.
 
 ```
 benchmark                       iters     total us        ns/op
 -------------------------- ---------- ------------ ------------
-C++ arithmetic                 200000        168.0          0.8   (1 add)
-getTicks()                       1000        243.9        243.9   (1 call)
-creep.hits()                     2000        888.7        444.3   (1 property)
-scan creeps: val handles           20        614.9      30745.8   (1 pass)
-take snapshot                      20        571.6      28581.3   (1 pass)
-scan creeps: C++ snapshot        2000        222.2        111.1   (1 pass)
-getObjectsByPrototype              50        390.5       7810.0   (1 call)
+getCpuTime()                     1000       1724.4       1724.4   (1 call)
+C++ arithmetic                 200000        266.6          1.3   (1 add)
+getTicks()                       1000        311.7        311.7   (1 call)
+creep.hits()                     2000       4689.8       2344.9   (1 property)
+scan creeps: val handles           20       5118.9     255945.2   (1 pass)
+scan creeps: C++ snapshot        2000        127.0         63.5   (1 pass)
+getObjectsByPrototype              50        235.6       4712.9   (1 call)
 ```
 
-A "pass" is 50 creeps x 5 fields, so 250 reads. The three lines that matter:
+Per single read:
 
-| | ns per pass | ns per field |
+| | ns per read | vs a C++ add |
 |---|---|---|
-| through val handles | ~30 000 | ~120 |
-| from a C++ snapshot | ~110 | ~0.4 |
+| property through a val handle | ~1 830 | ~1 400x |
+| field from a C++ snapshot | ~0.45 | ~0.35x |
 
-**A property read costs roughly 300x what the same read costs once the data is
-in WASM memory**, and about 150 times a C++ addition. That is the number the
-design question turns on.
+**A property read through a handle costs about 1.8 microseconds.** The tick
+budget is 100 ms, so a bot gets roughly **55 000 property reads per tick**.
 
-`getObjectsByPrototype()` is ~8 microseconds for 50 creeps -- around 160 ns per
-object, paid once per prototype per tick, on top of every field you then read.
+`getObjectsByPrototype()` is ~4.7 microseconds for 28 creeps, about 170 ns per
+object, paid once per prototype per tick before you read a single field.
 
-## What it does not tell you
+### The interesting part
 
-- **These are Node numbers.** The Arena runs user code under isolated-vm, not
-  plain Node. The *ratio* should carry across, since both are V8 doing the same
-  work, but the absolute figures will not.
-- **`getCpuTime()` here is the simulator's implementation**, which counts the
-  call and reads `performance.now()`. Its own cost (~1 microsecond) says nothing
-  about the real one. It only appears in the table to show that the two calls
-  each measurement makes are negligible against the totals.
-- **Nothing here is a claim about a real match.** The simulator is
-  [an approximation](../sim/FIDELITY.md).
+Comparing the same benchmark under Node (`npm run bench`) against the Arena:
 
-For numbers that decide something, deploy it:
+| | Node | Arena | ratio |
+|---|---|---|---|
+| property through a handle | ~120-300 ns | ~1 830 ns | **~10x worse** |
+| field from a snapshot | ~0.45 ns | ~0.45 ns | same |
+| per object in `getObjectsByPrototype` | ~160 ns | ~170 ns | same |
 
-```sh
-ARENA_DIR=~/ScreepsArena/season4-pain_and_gain npm run bench:deploy
-```
+The bulk array call did *not* get more expensive under isolated-vm, and neither
+did WASM-local memory. Only the individual round trips did. Whatever the Arena's
+sandbox costs, it costs it **per crossing**, so the fix is to make fewer
+crossings rather than to do less work.
 
-It runs one benchmark per tick -- the Arena bills wall-clock CPU per tick, and a
-single tick attempting all of them would be killed -- and prints the table on
-tick 9. Iteration counts are sized to stay well inside a 50 ms budget; lower
-them in `bench/bench.cc` if a tick gets cut off.
+### Caveats on those numbers
+
+The run above used 20 iterations and a warm-up of three, and it showed: taking a
+snapshot appeared 3.5x cheaper than the handle scan performing the identical
+reads, which cannot be true. The first pass-level benchmark was paying V8's
+tier-up on the next one's behalf.
+
+`measure()` now warms up for `iterations / 2 + 8`, and the pass-level benchmarks
+run 60 iterations instead of 20. After that change the two agree locally to
+within 1%, as they should. **The absolute figures above are therefore an upper
+bound on the handle cost; re-run to get clean ones.**
+
+Also note:
+
+- **`getCpuTime()` is itself a crossing**, at ~1.7 microseconds on the Arena.
+  Each measurement makes two of them, which is noise against these totals but
+  worth knowing if you time your own bot.
+- **`cpuTimeLimit` is in nanoseconds.** The typings give no unit; the raw value
+  is 1e8, which is 100 ms read as nanoseconds and absurd read as anything else.
+  The first tick gets 1e9, i.e. one second.
+- **The simulator is [an approximation](../sim/FIDELITY.md).** Local numbers
+  tell you about the boundary, not about a match.
 
 ## What to conclude
 
-Break-even sits at about one pass over the world per tick: taking a snapshot
-costs about what one handle-based pass costs, and every pass after that is
-essentially free. So:
+Taking a snapshot costs roughly what one handle-based pass costs, because it
+performs the same reads. Every pass after the first is then essentially free.
+So the break-even is around one pass over the world per tick:
 
-- A bot that looks at each creep **once** per tick gains nothing from a
-  snapshot. Handles are simpler and cost the same.
-- A bot that looks at the world **repeatedly** -- scoring targets, evaluating
-  several plans, running a search -- pays the full boundary cost every time, and
-  a snapshot turns all but the first pass into ordinary memory reads.
+- A bot that looks at each object **once** a tick gains nothing from a snapshot.
+  Handles are simpler, keep the result codes actions return, and cost the same.
+- A bot that looks at the world **repeatedly** -- scoring targets, comparing
+  plans, running a search -- pays the full boundary cost every time. At 1.8
+  microseconds a read, a search that evaluates a few thousand candidates against
+  live handles will not fit in 100 ms. A snapshot turns all but the first pass
+  into ordinary memory reads.
 
-The current design keeps handles because they read like the JS API and preserve
-the result codes actions return. If profiling on the real game shows the
-boundary eating the tick budget, [docs/DESIGN.md](../docs/DESIGN.md) describes
-what moving to a snapshot would cost in API changes.
+So the answer is not "handles are too slow" but "handles are too slow to read
+more than once". Read the world into your own structures at the top of the tick
+if you are going to traverse it repeatedly; otherwise leave it alone.
+
+The library keeps handles as the default because they read like the JS API and
+because most bots are in the first category. [docs/DESIGN.md](../docs/DESIGN.md)
+describes what moving the whole API to a snapshot would cost -- chiefly that
+actions could no longer return a result in the same tick.

@@ -33,6 +33,7 @@
 | Spawn のエネルギー自動回復 | 1 / tick、`SPAWN_ENERGY_CAPACITY` で頭打ち | typings にも公式ドキュメントにも定数が無い |
 | 移動疲労 | 入るマスにつき `2 x 非 move パーツ数 x 地形係数`、tick 頭に `2 x move パーツ数` 回復 | **疲労は「入るマス」で決まる。出るマスではない** |
 | 地形係数 | plain 1 / swamp 5 | road は未実測 |
+| `arenaInfo` の CPU 上限 | `cpuTimeLimit` 1e8 ns (100ms)、`cpuTimeLimitFirstTick` 1e9 ns (1 秒) | typings に単位の記載が無い。他の解釈はいずれも非現実的なので消去法で確定 |
 
 ---
 

@@ -13,8 +13,8 @@
 // the ratio between those two, and nobody had measured it.
 //
 // This runs one benchmark per tick, because the Arena bills wall-clock CPU per
-// tick (`arenaInfo.cpuTimeLimit`, typically 50ms) and a single tick that tried
-// to do all of them would be killed.
+// tick (`arenaInfo.cpuTimeLimit`, measured at 100 ms on Pain and Gain) and a
+// single tick that tried to do all of them would be killed.
 //
 // Run it locally with `npm run bench`. The numbers that decide anything are the
 // ones from the real game, though: see bench/README.md.
@@ -62,7 +62,12 @@ void measure(const char* name, const char* unit, long iterations, Body body) {
   // The JS side is JIT-compiled. A bot that has been running for hundreds of
   // ticks is in a very different state from one on its first call, and the
   // steady state is the one worth reporting.
-  for (long i = 0; i < iterations / 8 + 1; ++i) body();
+  //
+  // This has to be generous. An earlier version warmed up for iterations/8 and
+  // produced a table in which taking a snapshot looked 3.5x cheaper than the
+  // handle scan doing the identical reads -- because the scan ran first and
+  // paid V8's tier-up for those property accesses on the snapshot's behalf.
+  for (long i = 0; i < iterations / 2 + 8; ++i) body();
 
   const double start = arena::getCpuTime();
   for (long i = 0; i < iterations; ++i) body();
@@ -111,6 +116,14 @@ void report() {
     }
     std::printf("  taking the snapshot   %10.1f ns  (paid once per tick)\n",
                 nsPerOp(*takeSnapshot));
+
+    const double budget = arena::arenaInfo().cpuTimeLimit;
+    if (budget > 0) {
+      std::printf("  one handle pass is %.2f%% of the %.0f ms tick budget\n",
+                  100.0 * handleRead / budget, budget / 1e6);
+      std::printf("  budget allows ~%.0f handle passes, or ~%.0f snapshot passes\n",
+                  budget / handleRead, budget / snapshotRead);
+    }
 
     // A snapshot only pays for itself if the bot reads the world more than
     // once. Below this many passes, handles win.
@@ -168,14 +181,19 @@ void loop() {
   const int tick = getTicks();
 
   // Iteration counts are sized so no single tick approaches cpuTimeLimit on the
-  // real game. Raise them for a quieter local measurement; lower them if a tick
-  // gets killed.
+  // real game: the heaviest is the handle scan, at roughly 25 ms of a 100 ms
+  // budget once warm-up is included. Raise them for a quieter measurement;
+  // lower them if a tick gets killed.
   switch (tick) {
     case 1: {
-      std::printf("arena: %s / %s, cpu limit %.0f us (first tick %.0f us)\n",
+      // cpuTimeLimit is in nanoseconds, like getCpuTime(). The typings give no
+      // unit; this was established on the real game by elimination -- the raw
+      // value is 1e8, which is 100 ms as nanoseconds and absurd as anything
+      // else.
+      std::printf("arena: %s / %s, cpu limit %.1f ms (first tick %.1f ms)\n",
                   arenaInfo().name.c_str(), arenaInfo().season.c_str(),
-                  arenaInfo().cpuTimeLimit * 1000.0,
-                  arenaInfo().cpuTimeLimitFirstTick * 1000.0);
+                  arenaInfo().cpuTimeLimit / 1e6,
+                  arenaInfo().cpuTimeLimitFirstTick / 1e6);
       std::printf("creeps visible: %zu\n\n", creeps().size());
 
       // Timing overhead first: every other number here is two getCpuTime()
@@ -211,13 +229,13 @@ void loop() {
 
     case 5: {
       const std::vector<Creep> live = creeps();
-      measure("scan creeps: val handles", "1 pass", 20, [&live] { scanViaHandles(live); });
+      measure("scan creeps: val handles", "1 pass", 60, [&live] { scanViaHandles(live); });
       break;
     }
 
     case 6: {
       const std::vector<Creep> live = creeps();
-      measure("take snapshot", "1 pass", 20, [&live] { takeSnapshot(live); });
+      measure("take snapshot", "1 pass", 60, [&live] { takeSnapshot(live); });
       break;
     }
 
@@ -229,7 +247,7 @@ void loop() {
     case 8:
       // Fetching the array is a crossing of its own, and a bot does it every
       // tick for every prototype it cares about.
-      measure("getObjectsByPrototype", "1 call", 50, [] { g_sink = static_cast<long long>(creeps().size()); });
+      measure("getObjectsByPrototype", "1 call", 200, [] { g_sink = static_cast<long long>(creeps().size()); });
       break;
 
     case 9:

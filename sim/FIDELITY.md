@@ -35,6 +35,7 @@ arukuka/screeps-arena-bot.
 | Spawn energy regeneration | 1 per tick, capped at `SPAWN_ENERGY_CAPACITY` | Neither the typings nor the documentation give a constant |
 | Movement fatigue | `2 × non-move parts × terrain` on entering a tile; `2 × move parts` recovered at the start of each tick | **Fatigue is charged for the tile entered, not the one left** |
 | Terrain factor | plain 1, swamp 5 | Roads unmeasured |
+| `arenaInfo` CPU limits | `cpuTimeLimit` 1e8 ns (100 ms), `cpuTimeLimitFirstTick` 1e9 ns (1 s) | The typings give no unit. Established by elimination: any other reading is absurd |
 
 ---
 

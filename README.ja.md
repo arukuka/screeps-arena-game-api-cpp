@@ -190,8 +190,11 @@ for (const Creep& creep : getObjectsByPrototype<Creep>()) {
 }
 ```
 
-Arena は tick あたりの実時間 CPU で課金される。ホットループで同じ
-プロパティを何度も読むならローカルに退避すること。
+Arena は tick あたりの実時間 CPU で課金され、実機での 1 回の読み取りは
+約 1.8 マイクロ秒 — Node の約 10 倍である。サンドボックスは仕事量ではなく
+**境界越えの回数**に課金するため。ホットループで同じプロパティを何度も読むなら
+ローカルに退避し、世界を tick に 2 回以上走査するなら自前の構造体へ写すこと。
+数値は [bench/README.ja.md](bench/README.ja.md)。
 
 ### ネイティブテストで見えるもの / 見えないもの
 
@@ -257,10 +260,10 @@ assert.equal(world.creep('c1').store.energy, 20);
 
 - **WASM 起動の実 CPU コスト**。2000 tick 完走したので予算内には収まっているが、
   初回 tick でどれだけ使っているかは測っていない。`getCpuTime()` を生やせば分かる
-- **実機での JS↔WASM 境界 1 回あたりのコスト**。`npm run bench` でローカルには
-  測れる（ハンドル経由のプロパティ読み取りは WASM メモリからの約 300 倍）が、
-  あれは Node の数値。`npm run bench:deploy` で同じベンチを実機に載せられる。
-  [bench/README.ja.md](bench/README.ja.md) を参照
+測定済み: ハンドル経由のプロパティ読み取りは**実機で約 1.8 マイクロ秒**、
+同じフィールドが WASM メモリにある場合は 0.45 ナノ秒。100ms の tick 予算に対し
+約 55,000 回の読み取りに相当する。`npm run bench` でローカル再現できる。
+ボットの書き方への含意は [bench/README.ja.md](bench/README.ja.md) を参照。
 
 ---
 

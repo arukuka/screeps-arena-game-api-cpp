@@ -52,8 +52,12 @@ snapshot design: write the whole state into WASM linear memory **once** at the
 top of the tick and read it as plain structs.
 
 The `apiCalls` counter in `sim/world.mjs` and
-`arena::testing::getTicksCallCount()` exist to count boundary crossings, so that
-decision can be made on numbers.
+`arena::testing::getTicksCallCount()` exist to count boundary crossings, and
+`bench/` measures what one costs. The numbers, from Pain and Gain: about 1.8
+microseconds per property read through a handle, against 0.45 nanoseconds for
+the same field in WASM memory, with a 100 ms tick budget. Notably the sandbox
+charges per crossing -- the bulk `getObjectsByPrototype()` call is no more
+expensive there than under Node.
 
 It would not be cheap. Properties become struct fields, and actions stop
 returning a result within the same tick -- the `ERR_NOT_IN_RANGE` branch that
