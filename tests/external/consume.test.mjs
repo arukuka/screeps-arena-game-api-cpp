@@ -93,7 +93,14 @@ describe('consuming the published package', { timeout: TIMEOUT_MS }, () => {
 
     // ...and on the template's own sim suite, which drives the compiled WASM.
     assert.match(output, /reads the game through the WASM boundary/, output);
-    assert.match(output, /^\u2139 fail 0$/m, output);
+
+    // `node --test` picks its reporter by Node version when stdout is not a
+    // TTY: TAP ("# fail 0") through Node 22, spec ("i fail 0") from Node 24.
+    // Accept either, rather than pinning a reporter in the template to suit
+    // this test. Asserting a non-zero pass count as well keeps a suite that
+    // silently ran nothing from looking like success.
+    assert.match(output, /^(?:\u2139|#) fail 0$/m, output);
+    assert.match(output, /^(?:\u2139|#) pass [1-9]\d*$/m, output);
   });
 
   it('bundles to a deployable, pure-ASCII main.mjs', () => {
