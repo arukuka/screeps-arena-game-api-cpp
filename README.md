@@ -115,8 +115,8 @@ export const loop = createArenaEntry(createArenaBot);
                        │  arena_loop()        src/entry.cc        │
                        │      └─ arena::loop()   あなたのコード   │
                        │            └─ arena::getTicks()          │
-                       │                     src/utils_wasm.cc    │
-                       │                     EM_JS ───────────────┼──► Module.arena.getTicks()
+                       │                     src/bridge.cc         │
+                       │                     val ─────────────────┼──► Module.arena.getTicks()
                        └──────────────────────────────────────────┘
 ```
 
@@ -127,7 +127,7 @@ export const loop = createArenaEntry(createArenaBot);
 
 C++ 側も同じ形で、`include/arena/utils.h` の宣言に対し実装が 2 つ:
 
-- `src/utils_wasm.cc` — EM_JS 経由の本物のブリッジ (`arena::api`)
+- `src/bridge.cc` — `emscripten::val` 経由の本物のブリッジ (`arena::api`)
 - `testing/fake.cc` — ネイティブ単体テスト用のフェイク (`arena::testing`)
 
 ### オブジェクトは `emscripten::val` ハンドル
@@ -169,7 +169,7 @@ Arena は tick あたりの実時間 CPU で課金される。ホットループ
 
 ### なぜ npm で C++ ごと配るのか
 
-`EM_JS` の関数名と `host.mjs` のキーは一致していなければならない。
+`src/bridge.cc` が呼ぶ名前と `host.mjs` のキーは一致していなければならない。
 C++ と JS を別経路 (FetchContent と npm など) で取得できるようにすると、
 **バージョンがずれた組み合わせが成立してしまい、誰も気づけない。**
 1 パッケージ 1 バージョンにすることで、この破綻を構造的に防いでいる。
@@ -181,11 +181,11 @@ C++ と JS を別経路 (FetchContent と npm など) で取得できるよう�
 `getTicks` と同じ経路をなぞる。ライブラリ側で 5 箇所:
 
 1. **`include/arena/utils.h`** — 宣言。名前は JS API と同一に (`getRange`, not `get_range`)
-2. **`src/utils_wasm.cc`** — `EM_JS` でブリッジを書く
+2. **`src/bridge.cc`** — ブリッジを書く
    ```cpp
-   EM_JS(int, arena_js_getRange, (int ax, int ay, int bx, int by), {
-     return Module["arena"]["getRange"]({x: ax, y: ay}, {x: bx, y: by});
-   });
+   int getTerrainAt(Position position) {
+     return detail::api().call<int>("getTerrainAt", detail::toVal(position));
+   }
    ```
 3. **`js/host.mjs`** — host table に追加
 4. **`sim/game/utils.mjs`** — シミュレータ側の実装
@@ -198,7 +198,7 @@ C++ と JS を別経路 (FetchContent と npm など) で取得できるよう�
 ### オブジェクトを返す API について
 
 `getObjectsByPrototype()` のようにオブジェクト配列を返す API を
-**1 個ずつ EM_JS で読むのは避けたほうがいい。** Arena は tick あたりの
+**プロパティを 1 つずつ読むのは避けたほうがいい。** Arena は tick あたりの
 実時間 CPU (`arenaInfo.cpuTimeLimit`) で課金され、JS↔WASM の往復はそこに直接効く。
 
 現状は `emscripten::val` ハンドル方式を採っている。JS API と 1:1 で読みやすい
@@ -503,3 +503,77 @@ push 後はそのまま `npm install` できる。
   初回 tick でどれだけ使っているかは測っていない。`getCpuTime()` を生やせば分かる
 - **JS↔WASM 境界 1 回あたりのコスト**。本格的な API を生やす前にここを測らないと、
   スナップショット方式へ切り替える判断ができない
+
+---
+
+## ライセンス
+
+**[MPL-2.0](LICENSE)**（Mozilla Public License 2.0）。
+
+MPL は**ファイル単位**のコピーレフト。「このプロジェクトのファイルを変更したら
+そのファイルは公開、自分で書いたファイルは自由」を、リンク形態と無関係に実現する。
+
+| やること | 義務 |
+|---|---|
+| このライブラリを使ってボットを書く・配布する・非公開にする | ボットのコードは**あなたのもの**。MPL は伝染しない |
+| ヘッダの inline 関数・テンプレートを使う | **無し。**行数制限のような条件は存在しない |
+| WASM や `main.mjs` に静的リンク・バンドルする | **無し。**MPL はリンク形態を区別しない |
+| 配布物に本ライブラリのコードが含まれる | 入手元を知らせる（下記） |
+| **このライブラリのファイル自体を変更して配る** | **その変更したファイルを MPL で公開** |
+
+### 唯一の小さな義務
+
+MPL §3.1 / §3.2(a) は、成果物を配布するとき「本ライブラリの Source Code Form の
+入手方法を受領者に知らせること」を求める。上流リポジトリの URL を書けば足りる。
+
+**`arenaBundle()` がこれを自動で出す**ので、通常は何もしなくてよい。
+`dist/main.mjs` の先頭に次が入る:
+
+```js
+/*
+ * This bot embeds screeps-arena-game-api-cpp, which is licensed under the
+ * Mozilla Public License, v. 2.0.
+ *
+ * Source: https://github.com/arukuka/screeps-arena-game-api-cpp
+ * Licence: https://mozilla.org/MPL/2.0/
+ *
+ * The bot's own code is not covered by that licence.
+ */
+```
+
+ソースを自分でホストする必要も、ボットのコードを出す必要もない。
+`tests/external/consume.test.mjs` がこの表記の存在を検証している。
+
+### なぜ LGPL ではなくこれか
+
+素の LGPL はこのプロジェクトでは意図どおりに動かない。
+
+1. **ヘッダ主体である。** LGPLv3 §3 がヘッダ利用を免除するのは
+   「10 行以下の inline 関数・テンプレート」まで。
+   `getObjectsByPrototype<T>()` のようなテンプレートはそれを超える。
+2. **静的リンクしかない。** 成果物は単一の WASM と単一の `main.mjs`。
+   LGPLv3 §4 は改変版ライブラリで再リンクできるようにすることを求めるが、
+   差し替え手段が存在しない。素直に読むとボットのオブジェクトコードか
+   原文の提供義務が生じ、「利用は自由」と正反対になる。
+
+これらを外すには自作の例外条項が要る。MPL は**そもそもこの区別を持たない**ため、
+例外条項なしで同じ意図が実現できる。特許条項も入っていて、GPL 互換でもある。
+
+### `template/` は別ライセンス
+
+コピーして自分のものにする前提の雛形なので、`template/` 以下だけは
+**0BSD**（[template/LICENSE](template/LICENSE)）。帰属表示すら不要で、
+MPL の通知義務もかからない。
+
+### 免責
+
+私は弁護士ではない。上記は MPL-2.0 の一般的な読み方であって、法的助言ではない。
+気になるなら [Mozilla の FAQ](https://www.mozilla.org/MPL/2.0/FAQ/) が分かりやすい。
+
+### Screeps: Arena について
+
+`include/arena/constants.h` と `sim/game/constants.mjs` の定数は、
+Screeps LLC が公開するゲーム Screeps: Arena の挙動を記述したもの。
+クライアント同梱の typings からの転記と実機測定に基づく。
+本プロジェクトは Screeps: Arena 自体に何の権利も主張せず、
+Screeps LLC とは無関係である。

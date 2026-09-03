@@ -112,6 +112,14 @@ describe('consuming the published package', { timeout: TIMEOUT_MS }, () => {
     // Nothing between here and the Arena promises to preserve non-ASCII bytes,
     // and one mangled byte is a WebAssembly.CompileError at startup.
     assert.deepEqual(offending, [], 'dist/main.mjs must contain only ASCII');
+
+    // MPL section 3.1 asks that recipients be told the Source Code Form is
+    // under the MPL and where to get it. `arenaBundle()` emits that as a
+    // banner, so a bot author satisfies it without having to know it exists.
+    const text = bundle.toString('utf8');
+    assert.match(text, /Mozilla Public License, v\. 2\.0/, 'missing MPL notice');
+    assert.match(text, /github\.com\/arukuka\/screeps-arena-game-api-cpp/,
+      'the notice must say where to get the source');
   });
 
   it('runs the bundled artifact against the simulator', async () => {

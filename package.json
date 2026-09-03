@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Write Screeps: Arena bots in C++ (WASM), with a local simulator",
   "type": "module",
-  "license": "MIT",
+  "license": "MPL-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/arukuka/screeps-arena-game-api-cpp.git"
@@ -27,6 +27,7 @@
     "arena-emsdk-setup": "scripts/setup-emsdk.sh"
   },
   "files": [
+    "LICENSE",
     ".emscripten-version",
     "CMakeLists.txt",
     "cmake/",
