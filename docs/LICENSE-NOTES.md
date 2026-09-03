@@ -1,20 +1,23 @@
-# ライセンス選択の根拠
+# Why this licence
 
-結論だけなら [README のライセンス節](../README.md#ライセンス)で足りる。
-ここには「なぜそれを選んだか」を残す。
+**English** | [日本語](LICENSE-NOTES.ja.md)
 
-採用したのは **[MPL-2.0](../LICENSE)**（Mozilla Public License 2.0）。
-ファイル単位のコピーレフトで、リンク形態を一切区別しない。
+The [licence section of the README](../README.md#licence) has the conclusion.
+This file records why that conclusion was reached.
+
+The choice is **[MPL-2.0](../LICENSE)** (Mozilla Public License 2.0): file-level
+copyleft that draws no distinction between linking models.
 
 ---
 
-## 唯一の小さな義務
+## The one small obligation
 
-MPL §3.1 / §3.2(a) は、成果物を配布するとき「本ライブラリの Source Code Form の
-入手方法を受領者に知らせること」を求める。上流リポジトリの URL を書けば足りる。
+MPL §3.1 and §3.2(a) ask that, when you distribute your artifact, you tell
+recipients how to obtain this library's Source Code Form. A link to the upstream
+repository satisfies it.
 
-**`arenaBundle()` がこれを自動で出す**ので、通常は何もしなくてよい。
-`dist/main.mjs` の先頭に次が入る:
+**`arenaBundle()` emits that for you**, so normally there is nothing to do. The
+top of `dist/main.mjs` carries:
 
 ```js
 /*
@@ -28,39 +31,43 @@ MPL §3.1 / §3.2(a) は、成果物を配布するとき「本ライブラリ�
  */
 ```
 
-ソースを自分でホストする必要も、ボットのコードを出す必要もない。
-`tests/external/consume.test.mjs` がこの表記の存在を検証している。
+You do not have to host the source yourself, and you do not have to publish your
+bot. `tests/external/consume.test.mjs` checks that the notice is really there.
 
-## なぜ LGPL ではなくこれか
+## Why not the LGPL
 
-素の LGPL はこのプロジェクトでは意図どおりに動かない。
+The plain LGPL does not do what this project needs.
 
-1. **ヘッダ主体である。** LGPLv3 §3 がヘッダ利用を免除するのは
-   「10 行以下の inline 関数・テンプレート」まで。
-   `getObjectsByPrototype<T>()` のようなテンプレートはそれを超える。
-2. **静的リンクしかない。** 成果物は単一の WASM と単一の `main.mjs`。
-   LGPLv3 §4 は改変版ライブラリで再リンクできるようにすることを求めるが、
-   差し替え手段が存在しない。素直に読むとボットのオブジェクトコードか
-   原文の提供義務が生じ、「利用は自由」と正反対になる。
+1. **This is a header-heavy library.** LGPLv3 §3 exempts header use only up to
+   "small macros, inline functions and templates (ten or fewer lines in
+   length)". Templates like `getObjectsByPrototype<T>()` are past that limit and
+   get compiled into your binary.
+2. **Static linking is the only option.** The artifact is a single WASM module
+   and a single `main.mjs`; there is no library to swap out. Read literally,
+   LGPLv3 §4 would require you to ship your bot's object code or source so that
+   somebody could relink it against a modified copy of this library -- the exact
+   opposite of "your bot is yours".
 
-これらを外すには自作の例外条項が要る。MPL は**そもそもこの区別を持たない**ため、
-例外条項なしで同じ意図が実現できる。特許条項も入っていて、GPL 互換でもある。
+Removing those two would take a hand-written exception clause. The MPL **has no
+such distinction in the first place**, so the same intent is expressed without
+one. It also carries a patent grant and stays GPL-compatible.
 
-## `template/` は別ライセンス
+## `template/` is licensed separately
 
-コピーして自分のものにする前提の雛形なので、`template/` 以下だけは
-**0BSD**（[template/LICENSE](../template/LICENSE)）。帰属表示すら不要で、
-MPL の通知義務もかからない。
+It is boilerplate meant to be copied and made your own, so everything under
+`template/` is **0BSD** ([template/LICENSE](../template/LICENSE)) instead. No
+attribution required, and no MPL notice obligation.
 
-## 免責
+## Disclaimer
 
-私は弁護士ではない。上記は MPL-2.0 の一般的な読み方であって、法的助言ではない。
-気になるなら [Mozilla の FAQ](https://www.mozilla.org/MPL/2.0/FAQ/) が分かりやすい。
+I am not a lawyer. The above is the ordinary reading of MPL-2.0, not legal
+advice. [Mozilla's FAQ](https://www.mozilla.org/MPL/2.0/FAQ/) is a clear place
+to check it against.
 
-## Screeps: Arena について
+## About Screeps: Arena
 
-`include/arena/constants.h` と `sim/game/constants.mjs` の定数は、
-Screeps LLC が公開するゲーム Screeps: Arena の挙動を記述したもの。
-クライアント同梱の typings からの転記と実機測定に基づく。
-本プロジェクトは Screeps: Arena 自体に何の権利も主張せず、
-Screeps LLC とは無関係である。
+The constants in `include/arena/constants.h` and `sim/game/constants.mjs`
+describe the behaviour of Screeps: Arena, a game published by Screeps LLC. They
+are transcribed from the typings the client installs and from measurements taken
+in matches. This project claims no rights in Screeps: Arena itself and is not
+affiliated with Screeps LLC.

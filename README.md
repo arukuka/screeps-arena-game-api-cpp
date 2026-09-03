@@ -1,11 +1,14 @@
 # screeps-arena-game-api-cpp
 
+**English** | [日本語](README.ja.md)
+
 [![CI](https://github.com/arukuka/screeps-arena-game-api-cpp/actions/workflows/ci.yml/badge.svg)](https://github.com/arukuka/screeps-arena-game-api-cpp/actions/workflows/ci.yml)
 
-Screeps: Arena のボットを **C++ (WASM)** で書くためのライブラリ。
-ローカルシミュレータと、Emscripten を知らなくても済む CMake ヘルパ付き。
+Write Screeps: Arena bots in **C++, compiled to WebAssembly**. Comes with a
+local simulator and a CMake helper, so you never have to learn Emscripten.
 
-実機で動作確認済み。Season 4 (Pain and Gain) にデプロイし **2000 tick 完走**している。
+Verified on the real game: deployed to Season 4 (Pain and Gain) and **ran the
+full 2000 ticks**.
 
 ```
 tick 1 (loop #1, previous 0)
@@ -14,26 +17,24 @@ tick 2 (loop #2, previous 1)
 tick 2000 (loop #2000, previous 1999)
 ```
 
-`previous` が前 tick の値を保持しているので、WASM のヒープが試合を通じて
-生存していることも実機で確認できている。
+`previous` holds the value from the tick before, which is the real game
+confirming that the WASM heap survives for the whole match.
 
 ---
 
----
+## Quick start
 
-## クイックスタート
-
-[`template/`](template/) をコピーして始めるのが早い。
+Copying [`template/`](template/) is the fastest way in.
 
 ```sh
 cp -r template my-bot && cd my-bot
 npm install
-npm run setup      # Emscripten 6.0.9 を third_party/emsdk へ (初回のみ、数分)
-npm test           # C++ 単体テスト + シミュレータ
+npm run setup      # installs Emscripten 6.0.9 into third_party/emsdk (once, a few minutes)
+npm test           # native C++ unit tests + the simulator
 npm run sim -- --ticks 5
 ```
 
-書くのは `arena::loop()` -- 毎 tick 呼ばれる 1 関数だけ。
+All you write is `arena::loop()` -- one function, called once per tick.
 
 ```cpp
 #include <arena/arena.h>
@@ -45,8 +46,8 @@ void loop() {
   for (const Creep& creep : getObjectsByPrototype<Creep>()) {
     if (!creep.my() || sources.empty()) continue;
 
-    // 行動はゲームの結果コードをそのまま返すので、
-    // Screeps でおなじみの書き方がそのまま通る。
+    // Actions return the game's own result code, so the shape every Screeps
+    // player already knows works unchanged.
     if (creep.harvest(sources[0]) == ERR_NOT_IN_RANGE) {
       creep.moveTo(sources[0].pos());
     }
@@ -55,52 +56,52 @@ void loop() {
 }  // namespace arena
 ```
 
-テンプレートでは判断を `src/strategy.cc` に分けてある。そちらは
-ゲームオブジェクトに触れないので**ネイティブで 1 秒でテストできる**
-（理由は下の「ネイティブテストで見えるもの / 見えないもの」）。
+The template keeps its decisions in `src/strategy.cc`. That file never touches
+a game object, so it **unit-tests natively in about a second** -- see
+"What native tests can and cannot see" below for why that split exists.
 
-デプロイ:
+Deploy:
 
 ```sh
 ARENA_DIR=~/ScreepsArena/season4-pain_and_gain npm run deploy
 ```
 
-必要なもの: Node 22+, CMake 3.25+, Ninja (macOS なら `brew install cmake ninja`)。
+Requires Node 22+, CMake 3.25+, and Ninja (`brew install cmake ninja` on macOS).
 
 ---
 
-## 何を提供するか
+## What you get
 
 ### C++
 
-| ヘッダ | 内容 |
+| Header | Contents |
 |---|---|
-| `<arena/bot.h>` | `arena::loop()` の**宣言のみ**。あなたが実装する。忘れるとリンクエラーになる |
-| `<arena/utils.h>` | `game/utils` のミラー。`getObjectsByPrototype<Creep>()` など |
-| `<arena/prototypes.h>` | `Creep` / `StructureSpawn` / `StructureTower` ほか全プロトタイプ |
-| `<arena/constants.h>` | `game/constants` 全定数 + 実測値 |
-| `<arena/types.h>` | `Position` / `getRange()` など。**JS に触れないのでネイティブでも使える** |
-| `<arena/path_finder.h>` | `searchPath()` / `CostMatrix` |
+| `<arena/bot.h>` | **Declares** `arena::loop()` and nothing else. You implement it; forgetting is a link error |
+| `<arena/utils.h>` | Mirror of `game/utils`, e.g. `getObjectsByPrototype<Creep>()` |
+| `<arena/prototypes.h>` | `Creep`, `StructureSpawn`, `StructureTower` and every other prototype |
+| `<arena/constants.h>` | Every `game/constants` value, plus the ones measured in real matches |
+| `<arena/types.h>` | `Position`, `getRange()` and friends. **Touches no JavaScript, so it works natively too** |
+| `<arena/path_finder.h>` | `searchPath()`, `CostMatrix` |
 | `<arena/visual.h>` | `Visual` |
-| `<arena/arena.h>` | 上記すべて |
-| `<arena/testing/fake.h>` | ネイティブ単体テスト用のフェイク制御 |
+| `<arena/arena.h>` | All of the above |
+| `<arena/testing/fake.h>` | Fakes for native unit tests |
 
-| CMake ターゲット | 用途 |
+| CMake target | Purpose |
 |---|---|
-| `arena_add_bot(<target> SOURCES ...)` | `.mjs` を生成する。**リンクフラグはすべてここに入っている** |
-| `arena::api` | 本物のブリッジ (WASM ビルド時) |
-| `arena::testing` | 同じ API をフェイクで実装 (ネイティブビルド時) |
+| `arena_add_bot(<target> SOURCES ...)` | Produces the `.mjs`. **Every link flag lives in here** |
+| `arena::api` | The real bridge (WASM build) |
+| `arena::testing` | The same API backed by fakes (native build) |
 
 ### JavaScript
 
-| import | 内容 |
+| Import | Contents |
 |---|---|
-| `screeps-arena-game-api-cpp/arena` | `createArenaEntry()` — Arena 用エントリ。`game/*` を import するので**実機でしか読めない** |
-| `screeps-arena-game-api-cpp/sim` | `createMatch()`, `World` — ローカル実行 |
-| `screeps-arena-game-api-cpp/rollup` | `arenaBundle()` — rollup 設定 |
-| `screeps-arena-game-api-cpp` | `createHost()`, `createBot()` — 低レベル |
+| `screeps-arena-game-api-cpp/arena` | `createArenaEntry()` -- the Arena entry point. Imports `game/*`, so it **only loads inside the real game** |
+| `screeps-arena-game-api-cpp/sim` | `createMatch()`, `World` -- running locally |
+| `screeps-arena-game-api-cpp/rollup` | `arenaBundle()` -- the rollup config |
+| `screeps-arena-game-api-cpp` | `createHost()`, `createBot()` -- the low-level pieces |
 
-利用側が書くのはこれだけ:
+This is the whole of the JavaScript you write:
 
 ```js
 // js/main.mjs
@@ -110,92 +111,97 @@ import createArenaBot from '../dist/wasm/bot.mjs';
 export const loop = createArenaEntry(createArenaBot);
 ```
 
-定数は**推測していない**。typings に値が無く実機測定もできていないもの
-(`OBSTACLE_OBJECT_TYPES` など) は `constants.h` に定義せず、
-`arena::obstacleObjectTypes()` で実機から読む。理由は
-[docs/DESIGN.md](docs/DESIGN.md)。
+Constants are **never guessed at**. Anything the typings declare without a
+value and nobody has measured -- `OBSTACLE_OBJECT_TYPES`, for instance -- is
+deliberately absent from `constants.h`; read it from the running game with
+`arena::obstacleObjectTypes()` instead. The reasoning is in
+[docs/DESIGN.md](docs/DESIGN.md).
 
 ---
 
-## アーキテクチャ
+## Architecture
 
 ```
-                  ┌────────────────────────── Arena ランタイム ───┐
-  毎 tick         │  import { loop } from 'main.mjs'             │
-  ─────────────►  │  loop()                                      │
-                  └───────────────┬──────────────────────────────┘
+                  ┌────────────────────────── Arena runtime ──────┐
+  every tick      │  import { loop } from 'main.mjs'              │
+  ─────────────►  │  loop()                                       │
+                  └───────────────┬───────────────────────────────┘
                                   │
-                    js/arena.mjs  │  game/utils を import して host table を作る
+                    js/arena.mjs  │  imports game/utils, builds the host table
                                   ▼
-                     js/host.mjs  ├── createHost({ utils })  ◄── 唯一の接続点
+                     js/host.mjs  ├── createHost({ utils })  ◄── the only seam
                                   │
-                  js/runtime.mjs  │  WASM を同期的に instantiate
+                  js/runtime.mjs  │  instantiates the WASM synchronously
                                   ▼
-                       ┌──────────────────── WASM ────────────────┐
-                       │  arena_loop()        src/entry.cc        │
-                       │      └─ arena::loop()   あなたのコード   │
-                       │            └─ arena::getTicks()          │
+                       ┌──────────────────── WASM ─────────────────┐
+                       │  arena_loop()        src/entry.cc         │
+                       │      └─ arena::loop()   your code         │
+                       │            └─ arena::getTicks()           │
                        │                     src/bridge.cc         │
-                       │                     val ─────────────────┼──► Module.arena.getTicks()
-                       └──────────────────────────────────────────┘
+                       │                     val ──────────────────┼──► Module.arena.getTicks()
+                       └───────────────────────────────────────────┘
 ```
 
-**`js/host.mjs` の host table が唯一の接続点**であることが設計の要。
-本番 (`js/arena.mjs`) は実 `game/*` を、シミュレータ (`sim/harness.mjs`) は
-`sim/game/*` を同じ `createHost()` に渡す。
-配線が 1 箇所しかないので、シミュレータが本番から配線ミスで乖離することがない。
+**The host table in `js/host.mjs` is the only seam**, and that is the point of
+the design. Production (`js/arena.mjs`) passes the real `game/*`; the simulator
+(`sim/harness.mjs`) passes `sim/game/*`. Both go through the same
+`createHost()`, so the simulator cannot drift from production by wiring
+something up differently.
 
-C++ 側も同じ形で、`include/arena/utils.h` の宣言に対し実装が 2 つ:
+The C++ side has the same shape: one set of declarations in
+`include/arena/utils.h`, two implementations.
 
-- `src/bridge.cc` — `emscripten::val` 経由の本物のブリッジ (`arena::api`)
-- `testing/fake.cc` — ネイティブ単体テスト用のフェイク (`arena::testing`)
+- `src/bridge.cc` -- the real bridge, through `emscripten::val` (`arena::api`)
+- `testing/fake.cc` -- fakes for native unit tests (`arena::testing`)
 
-### オブジェクトは `emscripten::val` ハンドル
+### Game objects are `emscripten::val` handles
 
-ゲームオブジェクトは JS オブジェクトへの薄いラッパで、
-**プロパティ読み取りのたびに JS 境界を越える**。そのため JS の
-プロパティは C++ では**メソッド**になっている (`creep.hits()`)。
-コストが呼び出し側から見えるようにするための意図的な差異。
+A game object is a thin wrapper around the JavaScript object the Arena handed
+us, so **reading a property crosses the JS boundary**. That is why a property in
+the JS API is a *method* here (`creep.hits()`): the cost is deliberately visible
+at the call site.
 
 ```cpp
 for (const Creep& creep : getObjectsByPrototype<Creep>()) {
-  if (!creep.my()) continue;                        // 境界を越える
-  if (creep.harvest(source) == ERR_NOT_IN_RANGE) {  // 境界を越える
+  if (!creep.my()) continue;                        // crosses the boundary
+  if (creep.harvest(source) == ERR_NOT_IN_RANGE) {  // crosses the boundary
     creep.moveTo(source.pos());
   }
 }
 ```
 
-Arena は tick あたりの実時間 CPU で課金される。ホットループで同じ
-プロパティを何度も読むならローカルに退避すること。
+The Arena bills wall-clock CPU per tick. In a hot loop, hoist a property you
+read repeatedly into a local.
 
-### ネイティブテストで見えるもの / 見えないもの
+### What native tests can and cannot see
 
-`emscripten::val` にホスト側の等価物は無い。したがって:
+`emscripten::val` has no host equivalent. So:
 
-| | ネイティブ | WASM |
+| | Native | WASM |
 |---|---|---|
-| `constants.h` / `types.h` (`getRange` など) | ✅ | ✅ |
-| `getTicks` / `getCpuTime` / `getTerrainAt` / `getDirection` | ✅ (`arena::testing` がフェイク) | ✅ |
-| オブジェクトモデル全般 | ❌ | ✅ |
+| `constants.h` / `types.h` (`getRange`, ...) | ✅ | ✅ |
+| `getTicks` / `getCpuTime` / `getTerrainAt` / `getDirection` | ✅ (faked by `arena::testing`) | ✅ |
+| The object model | ❌ | ✅ |
 
-つまり**ゲームオブジェクトを読むコードはネイティブでテストできない。**
-`template/` はこれに対する書き方を示している:
+In other words, **code that reads game objects cannot be tested natively.**
+`template/` shows the shape that deals with it:
 
-- `src/strategy.cc` — plain data 上の判断。ネイティブで 1 秒テスト
-- `src/bot.cc` — ゲームを読み、strategy を呼び、行動を出すだけの薄い層
+- `src/strategy.cc` -- decisions over plain data. Tests natively, in a second
+- `src/bot.cc` -- a thin layer that reads the game, calls strategy, acts
 
-判断を strategy 側に寄せるほど、速いループでテストできる範囲が広がる。
+The more of the thinking that lives in strategy, the more of your bot you can
+test in the fast loop.
 
-配布単位を 1 パッケージにしている理由、`emscripten::val` をやめる場合の
-判断材料は [docs/DESIGN.md](docs/DESIGN.md) に書いてある。
+Why the C++ and the JavaScript ship as one package, and what would have to be
+true to give up `emscripten::val`, are in [docs/DESIGN.md](docs/DESIGN.md).
 
 ---
 
-## シミュレータ
+## The simulator
 
-簡易エンジンを実装してある。移動 (疲労・衝突)、戦闘 (近接・遠隔・
-mass attack・回復・タワー)、採掘、建設、資源の受け渡し、スポーンを解決する。
+There is a simple engine. It resolves movement (fatigue, collisions), combat
+(melee, ranged, mass attack, healing, towers), harvesting, building, resource
+transfer, and spawning.
 
 ```js
 const world = new World({ width: 20, height: 20 });
@@ -208,53 +214,58 @@ match.run(10);
 assert.equal(world.creep('c1').store.energy, 20);
 ```
 
-**これは近似であって実機エンジンではない。**
-何が実測に基づき、何が Screeps World からの推定で、何が実装されていないかは
-[`sim/FIDELITY.md`](sim/FIDELITY.md) に全部書いてある。
-細部を詰める前に必ず読むこと。
+**It is an approximation, not the real engine.** Which rules come from
+measurement, which are assumed from Screeps World, and which are simply not
+implemented is all written down in [`sim/FIDELITY.md`](sim/FIDELITY.md). Read it
+before you tune anything fine-grained.
 
 ---
 
-## ドキュメント
+## Documentation
 
 | | |
 |---|---|
-| [sim/FIDELITY.md](sim/FIDELITY.md) | **シミュレータの忠実度。**何が実測で、何が推定で、何が未実装か。細部を詰める前に読むこと |
-| [docs/ARENA-RUNTIME.md](docs/ARENA-RUNTIME.md) | Arena サンドボックスの挙動、ビルドフラグの根拠、起動に失敗したときの読み方 |
-| [docs/DESIGN.md](docs/DESIGN.md) | 定数の扱い、配布単位、オブジェクト表現の選択 |
-| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | このリポジトリ自体を開発する |
-| [docs/LICENSE-NOTES.md](docs/LICENSE-NOTES.md) | ライセンス選択の根拠 |
+| [sim/FIDELITY.md](sim/FIDELITY.md) | **How faithful the simulator is.** What was measured, what is assumed, what is missing. Read before tuning details |
+| [docs/ARENA-RUNTIME.md](docs/ARENA-RUNTIME.md) | How the Arena sandbox behaves, why each build flag is set, and how to read a startup failure |
+| [docs/DESIGN.md](docs/DESIGN.md) | Constants policy, packaging, the choice of object representation |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Working on this repository itself |
+| [docs/LICENSE-NOTES.md](docs/LICENSE-NOTES.md) | Why this licence |
 
 ---
 
-## 未計測
+## Not measured
 
-方式の成立自体は実機で確認済み。残っているのは性能。
+The approach itself is confirmed on the real game. What is left is performance.
 
-- **WASM 起動の実 CPU コスト**。2000 tick 完走したので予算内には収まっているが、
-  初回 tick でどれだけ使っているかは測っていない。`getCpuTime()` を生やせば分かる
-- **JS↔WASM 境界 1 回あたりのコスト**。本格的な API を生やす前にここを測らないと、
-  スナップショット方式へ切り替える判断ができない
+- **The real CPU cost of starting the WASM.** It fits the budget -- 2000 ticks
+  completed -- but nobody has measured how much of the first tick it eats.
+  Adding a `getCpuTime()` call would tell you.
+- **The cost of one JS↔WASM boundary crossing.** Without this number there is no
+  basis for deciding whether to move to a snapshot design, so measure it before
+  the API grows much further.
 
 ---
 
-## ライセンス
+## Licence
 
-**[MPL-2.0](LICENSE)**。`template/` 以下のみ [0BSD](template/LICENSE)。
+**[MPL-2.0](LICENSE)**, except `template/`, which is [0BSD](template/LICENSE).
 
-MPL は**ファイル単位**のコピーレフトで、リンク形態を区別しない。
+The MPL is **file-level** copyleft and draws no distinction between linking
+models.
 
-| やること | 義務 |
+| What you do | What you owe |
 |---|---|
-| ボットを書く・配布する・非公開にする | ボットのコードは**あなたのもの** |
-| ヘッダの inline 関数・テンプレートを使う | **無し** |
-| WASM や `main.mjs` に静的リンク・バンドルする | **無し** |
-| **このライブラリのファイル自体を変更して配る** | その変更したファイルを MPL で公開 |
+| Write, distribute, or keep private a bot | Nothing. Your bot's code is **yours** |
+| Use the headers' inline functions and templates | Nothing |
+| Link or bundle statically into a WASM module or `main.mjs` | Nothing |
+| **Change a file of this library and ship it** | Publish that file's source under the MPL |
 
-利用者に残る唯一の義務は「本ライブラリのソース入手先を知らせること」だが、
-`arenaBundle()` が `dist/main.mjs` の先頭に自動で出すので**通常は何もしなくてよい**。
+The one obligation left to you is telling recipients where this library's source
+lives -- and `arenaBundle()` writes that into the top of `dist/main.mjs`
+automatically, so **normally you do nothing at all**.
 
-選択の根拠と免責は [docs/LICENSE-NOTES.md](docs/LICENSE-NOTES.md)。
+The reasoning and the disclaimer are in
+[docs/LICENSE-NOTES.md](docs/LICENSE-NOTES.md).
 
-Screeps: Arena は Screeps LLC のゲーム。本プロジェクトは同社と無関係で、
-ゲーム自体に何の権利も主張しない。
+Screeps: Arena is a game by Screeps LLC. This project is unaffiliated with them
+and claims no rights in the game itself.

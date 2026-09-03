@@ -1,20 +1,22 @@
-# Arena ランタイムとビルドフラグ
+# The Arena runtime and the build flags
 
-Screeps: Arena のサンドボックス (isolated-vm) について実機で分かったことと、
-そこから逆算した Emscripten のリンクフラグ。
+**English** | [日本語](ARENA-RUNTIME.ja.md)
 
-**通常は読まなくてよい。** `arena_add_bot()` が全部やる。
-フラグを触る必要が出たときと、起動に失敗したときのために残してある。
+What the Screeps: Arena sandbox (isolated-vm) actually does, learned from
+running against it, and the Emscripten link flags derived from that.
+
+**You normally do not need this.** `arena_add_bot()` handles all of it. This is
+here for when you have to touch a flag, and for when startup fails.
 
 ---
 
-## Arena サンドボックス (isolated-vm) について分かったこと
+## What the Arena sandbox turned out to do
 
-実機のログから確定した事実。公式ドキュメントには書かれていない。
+Established from real logs. None of it is in the official documentation.
 
-### WebAssembly は使える
+### WebAssembly works
 
-実機プローブの結果:
+Probed on the real game:
 
 ```
 typeof WebAssembly = object
@@ -22,92 +24,100 @@ compile an empty module: ok
 reserve 256 pages (16MB): ok
 ```
 
-**この方式は成立する。** 実際に 2000 tick 完走している。
+**The approach is viable.** A bot has since run the full 2000 ticks.
 
-### console は `log()` しか無い
+### `console` only has `log()`
 
-`console.error` / `console.warn` が **undefined**。
-Emscripten の shell 用プリアンブルは
+`console.error` and `console.warn` are **undefined**. Emscripten's shell
+preamble reads:
 
 ```js
-if (globalThis.print) { console.warn ??= console.error ??= ...; }  // print が無いのでスキップ
+if (globalThis.print) { console.warn ??= console.error ??= ...; }  // skipped: no `print`
 var out = console.log.bind(console);
 var err = console.error.bind(console);   // ← TypeError
 ```
 
-と書かれていて、自前の補完は `globalThis.print` に依存している。
-Arena は `print` を定義しないので補完が丸ごとスキップされ、`.bind` で落ちる。
-しかもこれは `Module.print` / `printErr` が読まれる**前**なので、
-Module 経由の指定では間に合わない。
+Its own fallback is guarded on `globalThis.print`, which the Arena does not
+define, so the fallback is skipped entirely and `.bind` throws. Worse, this runs
+*before* `Module.print` / `printErr` are read, so supplying them cannot help.
 
-`js/runtime.mjs` の `ensureConsoleMethods()` がインスタンス化前に欠けを埋める。
-`tests/harness.test.mjs` に「`log()` だけの console」「凍結された console」の
-2 ケースを置いてある (シムを外すと両方落ちることを確認済み)。
+`ensureConsoleMethods()` in `js/runtime.mjs` fills the gaps before
+instantiation. `tests/harness.test.mjs` covers two cases -- a console with only
+`log()`, and a frozen one -- and both were confirmed to fail without the shim.
 
-### モジュール評価中の console 出力は試合ログに出ない
+### Console output during module evaluation never reaches the match log
 
-tick が書いたものだけが届く。診断は必ず `loop()` から出すこと。
+Only what a tick writes gets through. Always report diagnostics from `loop()`.
 
 ---
 
-## ビルドフラグの根拠
+## Why each build flag is set
 
-`cmake/ArenaBot.cmake` のリンクオプションは、いずれも実機での失敗から逆算している。
-特に次の 2 つは**変えると壊れる**。
+Every link option in `cmake/ArenaBot.cmake` was derived from a failure on the
+real game. Two of them **break things if changed**.
 
-### `-sENVIRONMENT=shell` (`node` を足してはいけない)
+### `-sENVIRONMENT=shell` (never add `node`)
 
-Emscripten が生成する factory は `async function` だが、
-`-sWASM_ASYNC_COMPILATION=0` と組み合わせると、**最初の `await` に到達する前に**
-`createWasm()` まで走り切り、エクスポートを渡したオブジェクトへ書き込む。
-つまり `createArenaBot(module)` が返った直後に `module._arena_loop` が既にある。
+The factory Emscripten generates is an `async function`, but combined with
+`-sWASM_ASYNC_COMPILATION=0` it runs all the way through `createWasm()` --
+which writes the exports onto the object you passed in -- **before it reaches
+its first `await`**. So `module._arena_loop` is already there the moment
+`createArenaBot(module)` returns.
 
-ここに `node` を足すと、生成コードの先頭が
+Add `node` and the generated code opens with:
 
 ```js
 if (ENVIRONMENT_IS_NODE) { const {createRequire} = await import("node:module"); ... }
 ```
 
-になり、instantiate より先に `await` が入って同期性が壊れる。実測で確認済み。
+which puts an `await` ahead of instantiation and destroys that property.
+Confirmed by measurement.
 
-なぜ同期性にこだわるか: **エントリに top-level await を書きたくない**から。
-Arena のサンドボックスが top-level await を持つエントリモジュールをどう評価するかは
-こちらから検証できず、最初の数 tick を落とすボットは負ける。
-副次的な利点として、この構成では生成コードに `import.meta` も現れない。
+Why the insistence on synchronous startup: **so the entry module needs no
+top-level await.** How the Arena sandbox evaluates an entry module with a
+pending top-level await cannot be verified from outside, and a bot that misses
+its first few ticks loses. A side benefit is that this configuration emits no
+`import.meta` either.
 
-### `-sSINGLE_FILE=1` + `-sSINGLE_FILE_BINARY_ENCODE=0`
+### `-sSINGLE_FILE=1` plus `-sSINGLE_FILE_BINARY_ENCODE=0`
 
-`.wasm` を `.mjs` に埋め込む。Arena は複数ファイルを受け付ける
-(コード合計 10MB まで) が、単一ファイルならバイナリの扱いを気にしなくて済む。
+The first embeds the `.wasm` into the `.mjs`. The Arena does accept multiple
+files (10 MB of code in total), but a single file means never having to think
+about how a binary is handled.
 
-`SINGLE_FILE_BINARY_ENCODE=0` が重要。Emscripten 6 の既定は base64 ではなく
-**独自のバイナリ文字列エンコーディング**で、約 25% 小さい代わりに
-「ファイルが UTF-8 として透過的に転送されること」を要求する (公式ドキュメント明記)。
+`SINGLE_FILE_BINARY_ENCODE=0` is the important half. Emscripten 6 defaults to a
+**custom binary string encoding** rather than base64. It is about 25% smaller,
+and in exchange it requires the file to survive transport as UTF-8 -- which
+Emscripten's own documentation states.
 
-既定のままだと生成物は制御文字 2900 個超を含む**バイナリファイル**になる。
-Arena の経路 — クライアントがファイル読込 → jszip → アップロード → サーバ →
-isolated-vm — はバイト透過を保証しない。1 バイト壊れれば起動時に
-`WebAssembly.CompileError` が出る。
+Left at the default, the output is a **binary file** containing over 2900
+control characters. The Arena's path -- client reads the file → jszip → upload →
+server → isolated-vm -- promises no byte transparency, and one mangled byte is a
+`WebAssembly.CompileError` at startup.
 
-base64 なら純 ASCII。`tests/external/consume.test.mjs` が
-生成された `dist/main.mjs` の純 ASCII 性をアサートしている。
+Base64 is pure ASCII. `tests/external/consume.test.mjs` asserts that the
+generated `dist/main.mjs` really is.
 
-その他:
+The rest:
 
-- `-sINVOKE_RUN=0` — `main()` は無く、Arena が `loop()` を駆動する
-- `-sALLOW_MEMORY_GROWTH=0` / `-sINITIAL_MEMORY=16MB` — ヒープ拡張を
-  tick の CPU 予算に載せない。足りなくなったら growth ではなく初期値を上げる
-- **embind は使っていない** — 境界は引数も戻り値も無い `loop()` 1 本なので、
-  `EMSCRIPTEN_KEEPALIVE` のほうが小さく速い
+- `-sINVOKE_RUN=0` -- there is no `main()`; the Arena drives `loop()`.
+- `-sALLOW_MEMORY_GROWTH=0` with `-sINITIAL_MEMORY=16MB` -- keeps heap growth
+  off the tick's CPU budget. If it runs short, raise the initial size rather
+  than enabling growth.
+- `--bind` -- embind is required because the object model uses
+  `emscripten::val`. The entry point the Arena calls (`arena_loop()`) is
+  exported with `EMSCRIPTEN_KEEPALIVE` rather than through embind: it takes no
+  arguments and returns nothing, so there is nothing for embind to do there.
 
 ---
 
-## 起動に失敗したときの読み方
+## Reading a startup failure
 
-`js/runtime.mjs` は**原因を推測せず、ランタイムが言ったことをそのまま出す**。
-Emscripten の factory は `async` なので、instantiate 中の例外は throw ではなく
-Promise の reject として届く。診断は必ず `loop()` から出す (上記の通り、
-モジュール評価中の出力は試合ログに届かない)。
+`js/runtime.mjs` **never guesses at the cause; it reports what the runtime
+said.** Emscripten's factory is `async`, so an exception during instantiation
+arrives as a rejected promise rather than a throw. Diagnostics are always
+emitted from `loop()`, because (as above) output during module evaluation never
+reaches the match log.
 
 ```
 [wasm] instantiation failed: CompileError: WebAssembly.Module(): ...
@@ -117,22 +127,25 @@ Promise の reject として届く。診断は必ず `loop()` から出す (上�
 [wasm] stack: CompileError: ...
 ```
 
-1 行目が要約、続く `[wasm]   ` 付きがランタイムへのプローブ、最後がスタック。
-コンソールが長い行を切っても要約とプローブは残るこの順序にしてある。
+The first line is the summary, the `[wasm]   ` lines are probes of the runtime,
+and the stack comes last. That order is deliberate: if the console clips a long
+line, the summary and the probes survive.
 
-| プローブ出力 | 意味 |
+| Probe output | Meaning |
 |---|---|
-| `typeof WebAssembly = undefined` | サンドボックスに WASM が無い。この方式自体が成立しない |
-| `compile an empty module:` が失敗 | WASM はあるがコード生成が embedder に禁止されている。8 バイトの空モジュールすら通らないので、こちらのコードの問題ではない |
-| `reserve 256 pages (16MB):` が失敗 | isolate のメモリ上限。`-sINITIAL_MEMORY` を下げる |
-| 全部 `ok` | ランタイムは正常。1 行目のエラーがこちらの成果物の問題 |
+| `typeof WebAssembly = undefined` | No WASM in the sandbox. The whole approach is off the table |
+| `compile an empty module:` fails | WASM exists but the embedder forbids code generation. An 8-byte empty module will not compile, so this is not your code |
+| `reserve 256 pages (16MB):` fails | The isolate's memory limit. Lower `-sINITIAL_MEMORY` |
+| everything `ok` | The runtime is fine; the error on the first line is a problem with your artifact |
 
-全部 `ok` のときの 1 行目の読み方:
+When every probe says `ok`, read the first line:
 
-- `CompileError` → 埋め込みペイロードの破損。純 ASCII アサートを確認する
-- `TypeError: Cannot read properties of undefined (reading 'bind')` →
-  サンドボックスに欠けている console メソッドがある。
-  `ensureConsoleMethods()` の `REQUIRED_CONSOLE_METHODS` に足す
+- `CompileError` → the embedded payload is corrupt. Check the pure-ASCII
+  assertion.
+- `TypeError: Cannot read properties of undefined (reading 'bind')` → the
+  sandbox is missing a console method. Add it to `REQUIRED_CONSOLE_METHODS` in
+  `ensureConsoleMethods()`.
 
-起動に失敗してもモジュール評価時に例外を投げず、tick をスキップして動き続ける。
-ボットとしては負けるが、**コンソールに理由が残る**ほうが診断できる。
+A failed startup does not throw during module evaluation. The bot skips ticks
+and keeps running. It loses the match, but **the reason stays in the console**,
+which is what makes it diagnosable.

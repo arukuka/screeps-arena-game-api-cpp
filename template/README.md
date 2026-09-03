@@ -1,30 +1,33 @@
 # my-arena-bot
 
-Screeps: Arena のボットを C++ で書くためのテンプレート。
-[screeps-arena-game-api-cpp](https://github.com/arukuka/screeps-arena-game-api-cpp) を使う。
+**English** | [日本語](README.ja.md)
 
-## セットアップ
+A template for writing Screeps: Arena bots in C++, built on
+[screeps-arena-game-api-cpp](https://github.com/arukuka/screeps-arena-game-api-cpp).
+
+## Setup
 
 ```sh
 npm install
-npm run setup      # Emscripten を third_party/emsdk へ (初回のみ、数分)
+npm run setup      # installs Emscripten into third_party/emsdk (once, a few minutes)
 ```
 
-`EMSDK` を既にシェルに設定していれば `npm run setup` は不要。
+Skip `npm run setup` if your shell already has `EMSDK` set.
 
-必要なもの: Node 22+, CMake 3.25+, Ninja (macOS なら `brew install cmake ninja`)。
+Requires Node 22+, CMake 3.25+, and Ninja (`brew install cmake ninja` on macOS).
 
-### エディタ (clangd)
+### Editors (clangd)
 
-`npm run build` を一度通すと `.clangd` が生成され、補完と定義ジャンプが効くようになる。
+Running `npm run build` once generates `.clangd`, after which completion and
+go-to-definition work.
 
-生成物なので `.gitignore` に入っている。手で `.clangd` を置けばそちらが優先され、
-生成は行われない。仕組みは
-`node_modules/screeps-arena-game-api-cpp/cmake/ClangdConfig.cmake` に書いてある。
+It is generated, so it is gitignored. Writing your own `.clangd` takes
+precedence and suppresses generation. How it works is documented in
+`node_modules/screeps-arena-game-api-cpp/cmake/ClangdConfig.cmake`.
 
-## 書く
+## Writing the bot
 
-`src/bot.cc` の `arena::loop()` が毎 tick 呼ばれる。
+`arena::loop()` in `src/bot.cc` is called once per tick.
 
 ```cpp
 #include <arena/arena.h>
@@ -39,79 +42,83 @@ void loop() {
 }  // namespace arena
 ```
 
-JS の**プロパティは C++ ではメソッド**になっている (`creep.hits()`)。
-読むたびに JS 境界を越えるので、コストが呼び出し側から見えるようにしてある。
+A JS **property is a method here** (`creep.hits()`). Every read crosses the JS
+boundary, and the method call makes that cost visible at the call site.
 
-**WASM のヒープは試合を通じて生存する。** グローバルや関数 static に置いた状態は
-tick をまたいで残る。毎 tick 作り直さなくていいことが、そもそも C++ で書く動機。
+**The WASM heap survives the whole match.** State in globals or function statics
+persists across ticks. Not having to rebuild it every tick is the reason to
+write a bot in C++ at all.
 
-### なぜ src/ が 2 つに分かれているか
+### Why src/ is split in two
 
-| ファイル | 役割 | ネイティブテスト |
+| File | Role | Native tests |
 |---|---|---|
-| `src/strategy.cc` | plain data 上の判断 | ✅ 1 秒 |
-| `src/bot.cc` | ゲームを読み、strategy を呼び、行動を出す | ❌ |
+| `src/strategy.cc` | decisions over plain data | ✅ one second |
+| `src/bot.cc` | reads the game, calls strategy, acts | ❌ |
 
-ゲームオブジェクトは `emscripten::val` で表現されており、ホスト側に等価物が無い。
-つまり `Creep` を読むコードは WASM でしか動かず、ネイティブテストできない。
+Game objects are `emscripten::val` handles, and there is no host equivalent, so
+code that reads a `Creep` only runs under WASM and cannot be tested natively.
 
-**判断を `strategy.cc` に寄せるほど、速いループでテストできる範囲が広がる。**
-`bot.cc` は薄く保つこと。
+**The more of the thinking that lives in `strategy.cc`, the more you can test in
+the fast loop.** Keep `bot.cc` thin.
 
-## 動かす
+## Running
 
 ```sh
-npm run sim                   # シミュレータでフル tick 実行
-npm run sim -- --ticks 5      # 5 tick だけ
-npm test                      # C++ 単体テスト + シミュレータ
+npm run sim                   # run the arena's full tick limit
+npm run sim -- --ticks 5      # just 5 ticks
+npm test                      # native C++ tests + the simulator
 ```
 
-## デプロイ
+## Deploying
 
 ```sh
 ARENA_DIR=~/ScreepsArena/season4-pain_and_gain npm run deploy
 ```
 
-`dist/main.mjs`（WASM を base64 で埋め込んだ単一ファイル）がコピーされる。
+That copies `dist/main.mjs`, a single file with the WASM embedded as base64.
 
-## テストの二層構造
+## Two layers of tests
 
-| | 対象 | 速さ | 依存 |
+| | Covers | Speed | Needs |
 |---|---|---|---|
-| `tests/bot_test.cc` | `strategy.cc` の判断 | ~1 秒 | なし (ネイティブ) |
-| `tests/sim.test.mjs` | コンパイル済み WASM + シミュレータ | ~0.1 秒 | ビルド済み WASM |
+| `tests/bot_test.cc` | the decisions in `strategy.cc` | ~1 second | nothing (native) |
+| `tests/sim.test.mjs` | compiled WASM against the simulator | ~0.1 second | a built WASM |
 
-ネイティブテストは `arena::testing` をリンクする。これは `game/utils` のうち
-**JS の値を持たない部分**（`getTicks` など）をフェイクで実装したもの。
-`src/strategy.cc` はゲームオブジェクトに触れないので、ここで完結してテストできる。
+The native tests link `arena::testing`, which fakes the part of `game/utils`
+that **carries no JavaScript values** (`getTicks` and friends).
+`src/strategy.cc` never touches a game object, so it tests entirely here.
 
-`arena::testing::getTicksCallCount()` で API 呼び出し回数も検証できる。
-Arena は tick あたりの実時間 CPU で課金され、API 呼び出しは毎回 JS 境界を
-越えるので、この回数に上限を張っておくと効く。
+`arena::testing::getTicksCallCount()` also lets you assert on how many API calls
+you made. The Arena bills wall-clock CPU per tick and every API call crosses the
+JS boundary, so putting a ceiling on that count is worth doing.
 
-`src/bot.cc` はゲームオブジェクトを読むためネイティブでは動かない。
-そちらは `tests/sim.test.mjs` がコンパイル済み WASM ごと検証する。
+`src/bot.cc` reads game objects and therefore does not run natively;
+`tests/sim.test.mjs` covers it against the compiled WASM instead.
 
-## レイアウト
+## Layout
 
 ```
-src/strategy.cc       判断（ネイティブテスト対象）
-src/bot.cc            ゲームとの接続
-js/main.mjs           Arena エントリポイント (触る必要はほぼない)
-sim/run.mjs           ローカル実行の CLI
-tests/                ネイティブ単体テストとシミュレータテスト
-CMakeLists.txt        arena_add_bot() を呼ぶだけ
+src/strategy.cc       decisions (what the native tests cover)
+src/bot.cc            the connection to the game
+js/main.mjs           the Arena entry point (rarely needs touching)
+sim/run.mjs           CLI for running locally
+tests/                native unit tests and simulator tests
+CMakeLists.txt        just calls arena_add_bot()
 ```
 
-シミュレータのエンジンは**近似**である。何が実測に基づき、何が推定で、
-何が未実装かは `node_modules/screeps-arena-game-api-cpp/sim/FIDELITY.md` に書いてある。
-細部を詰める前に読むこと。
+The simulator's engine is an **approximation**. What is measured, what is
+assumed, and what is missing are all in
+`node_modules/screeps-arena-game-api-cpp/sim/FIDELITY.md`. Read it before tuning
+details.
 
-ライブラリ側のドキュメント（[screeps-arena-game-api-cpp](https://github.com/arukuka/screeps-arena-game-api-cpp)）:
+Library documentation
+([screeps-arena-game-api-cpp](https://github.com/arukuka/screeps-arena-game-api-cpp)):
 
 - [docs/ARENA-RUNTIME.md](https://github.com/arukuka/screeps-arena-game-api-cpp/blob/main/docs/ARENA-RUNTIME.md)
-  — Arena サンドボックスの癖、ビルドフラグの根拠、**起動に失敗したときの読み方**
+  — the Arena sandbox's quirks, why each build flag is set, and **how to read a
+  startup failure**
 - [docs/DESIGN.md](https://github.com/arukuka/screeps-arena-game-api-cpp/blob/main/docs/DESIGN.md)
-  — 定数の扱い、オブジェクト表現の選択
+  — the constants policy, the choice of object representation
 - [docs/CONTRIBUTING.md](https://github.com/arukuka/screeps-arena-game-api-cpp/blob/main/docs/CONTRIBUTING.md)
-  — API の増やし方
+  — how to add an API
