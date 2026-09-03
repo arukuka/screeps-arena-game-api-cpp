@@ -31,8 +31,8 @@ export function getTicks() {
 /** CPU wall time elapsed in the current tick, in nanoseconds. */
 export function getCpuTime() {
   count('getCpuTime');
-  // Real elapsed time, so a bot that budgets against it behaves plausibly.
-  return Number(process.hrtime.bigint() % 1_000_000_000n);
+  // Nanoseconds elapsed since the tick began.
+  return (performance.now() - world().tickStartedAt) * 1e6;
 }
 
 export function getDirection(dx, dy) {

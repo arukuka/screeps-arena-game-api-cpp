@@ -55,4 +55,13 @@ if(PROJECT_IS_TOP_LEVEL)
     include(CTest)
   endif()
   add_subdirectory(tests)
+
+  # What the JS boundary costs, measured rather than guessed at. WASM only:
+  # there is no boundary to cross in a native build.
+  if(EMSCRIPTEN)
+    arena_add_bot(bench
+      SOURCES bench/bench.cc
+      OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/bench"
+    )
+  endif()
 endif()

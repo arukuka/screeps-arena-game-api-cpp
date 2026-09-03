@@ -266,9 +266,11 @@ taken at all.
 - **The real CPU cost of starting the WASM.** It fits the budget -- 2000 ticks
   completed -- but nobody has measured how much of the first tick it eats.
   Adding a `getCpuTime()` call would tell you.
-- **The cost of one JS↔WASM boundary crossing.** Without this number there is no
-  basis for deciding whether to move to a snapshot design, so measure it before
-  the API grows much further.
+- **The cost of one JS↔WASM boundary crossing on the real game.**
+  `npm run bench` measures it locally -- a property read through a handle costs
+  roughly 300x the same read from WASM memory -- but those are Node numbers.
+  `npm run bench:deploy` puts the same benchmark on the Arena.
+  See [bench/README.md](bench/README.md).
 
 ---
 

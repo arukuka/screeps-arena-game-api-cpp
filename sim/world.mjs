@@ -64,6 +64,17 @@ export class World {
     /** The Arena numbers ticks from 1; the bot never observes tick 0. */
     this.tick = 1;
 
+    /**
+     * When the current tick began, for `getCpuTime()`. Set by `beginTick()`;
+     * initialised here so a test that binds a world without running the engine
+     * still gets a sane reading rather than a negative one.
+     *
+     * `performance.now()` rather than `process.hrtime.bigint()`: a bot timing
+     * itself calls this often, and BigInt arithmetic made the reading cost more
+     * than most of what it was being used to measure.
+     */
+    this.tickStartedAt = performance.now();
+
     /** Row-major terrain grid, TERRAIN_* per tile. */
     this.terrain = new Uint8Array(width * height);
 

@@ -41,6 +41,8 @@
   "scripts": {
     "setup": "scripts/setup-emsdk.sh",
     "build:fixtures": "scripts/with-emsdk.sh cmake --preset wasm && scripts/with-emsdk.sh cmake --build --preset wasm",
+    "bench": "npm run build:fixtures && node bench/run.mjs",
+    "bench:deploy": "npm run build:fixtures && rollup -c bench/rollup.config.mjs && cp dist/bench.mjs \"${ARENA_DIR:?set ARENA_DIR to your arena source folder}/main.mjs\"",
     "test": "npm run test:cpp && npm run test:sim && npm run test:external",
     "test:cpp": "cmake --preset native && cmake --build --preset native && ctest --preset native",
     "test:sim": "npm run build:fixtures && node --test tests/constants.test.mjs tests/engine.test.mjs tests/harness.test.mjs tests/world.test.mjs",
@@ -49,5 +51,8 @@
   },
   "engines": {
     "node": ">=22.15"
+  },
+  "devDependencies": {
+    "rollup": "^4.60.0"
   }
 }

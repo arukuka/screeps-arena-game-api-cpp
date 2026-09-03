@@ -446,6 +446,7 @@ function cleanup(world) {
 export function beginTick(world) {
   world.intents = [];
   world.visuals = [];
+  world.tickStartedAt = performance.now();
   upkeep(world);
 }
 

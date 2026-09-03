@@ -257,8 +257,10 @@ assert.equal(world.creep('c1').store.energy, 20);
 
 - **WASM 起動の実 CPU コスト**。2000 tick 完走したので予算内には収まっているが、
   初回 tick でどれだけ使っているかは測っていない。`getCpuTime()` を生やせば分かる
-- **JS↔WASM 境界 1 回あたりのコスト**。本格的な API を生やす前にここを測らないと、
-  スナップショット方式へ切り替える判断ができない
+- **実機での JS↔WASM 境界 1 回あたりのコスト**。`npm run bench` でローカルには
+  測れる（ハンドル経由のプロパティ読み取りは WASM メモリからの約 300 倍）が、
+  あれは Node の数値。`npm run bench:deploy` で同じベンチを実機に載せられる。
+  [bench/README.ja.md](bench/README.ja.md) を参照
 
 ---
 
