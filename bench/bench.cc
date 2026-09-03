@@ -20,8 +20,10 @@
 // ones from the real game, though: see bench/README.md.
 
 #include <arena/arena.h>
+#include <emscripten/heap.h>
 
 #include <cstdio>
+#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -305,7 +307,22 @@ void loop() {
       measure("getObjectsByPrototype", "1 call", 200, [] { g_sink = static_cast<long long>(creeps().size()); });
       break;
 
-    case 11:
+    case 11: {
+      // Is 16 MB enough? Rather than argue about it, report what the bot is
+      // actually using. `sbrk(0)` is how far the allocator has grown into the
+      // heap; the gap to the total is headroom.
+      const std::size_t total = emscripten_get_heap_size();
+      const std::size_t used = reinterpret_cast<std::size_t>(sbrk(0));
+
+      std::printf("\nwasm memory: %.2f MB used of %.2f MB total (%.1f%%)\n",
+                  used / 1048576.0, total / 1048576.0,
+                  100.0 * static_cast<double>(used) / static_cast<double>(total));
+      std::printf("  snapshot buffer alone: %.2f KB for %d creeps\n",
+                  g_bulk.size() * sizeof(int32_t) / 1024.0, kMaxCreeps);
+      break;
+    }
+
+    case 12:
       report();
       break;
 

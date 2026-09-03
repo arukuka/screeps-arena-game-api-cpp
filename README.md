@@ -195,9 +195,9 @@ for (const Creep& creep : getObjectsByPrototype<Creep>()) {
 }
 ```
 
-The Arena bills wall-clock CPU per tick, and a read costs about 1.8 microseconds
-there -- roughly 10x what it costs under Node, because the sandbox charges per
-crossing rather than for the work. In a hot loop, hoist a property you read
+The Arena bills wall-clock CPU per tick, and a read costs about 0.5 microseconds
+there, some 70% of which is the crossing rather than the work. In a hot loop,
+hoist a property you read
 repeatedly into a local; if you traverse the world more than once a tick, copy
 what you need into your own structs first. [bench/README.md](bench/README.md)
 has the numbers.
@@ -270,9 +270,10 @@ taken at all.
 - **The real CPU cost of starting the WASM.** It fits the budget -- 2000 ticks
   completed -- but nobody has measured how much of the first tick it eats.
   Adding a `getCpuTime()` call would tell you.
-Measured since: a property read through a handle costs about **1.8 microseconds
-on the real game**, against 0.45 nanoseconds for the same field once it is in
-WASM memory. That is roughly 55 000 property reads per 100 ms tick.
+Measured since: a property read through a handle costs about **0.5 microseconds
+on the real game**, against 0.24 nanoseconds for the same field once it is in
+WASM memory -- roughly 200 000 property reads per 100 ms tick. About 70% of that
+half-microsecond is the boundary crossing itself.
 `npm run bench` reproduces it locally; see [bench/README.md](bench/README.md)
 for what it means for how you write a bot.
 

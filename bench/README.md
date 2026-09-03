@@ -20,91 +20,71 @@ Pain and Gain, 28 creeps. A "pass" is 28 creeps x 5 fields, so 140 reads.
 ```
 benchmark                       iters     total us        ns/op
 -------------------------- ---------- ------------ ------------
-getCpuTime()                     1000       1724.4       1724.4   (1 call)
+getCpuTime()                     1000       1268.8       1268.8   (1 call)
 C++ arithmetic                 200000        266.6          1.3   (1 add)
-getTicks()                       1000        311.7        311.7   (1 call)
-creep.hits()                     2000       4689.8       2344.9   (1 property)
-scan creeps: val handles           20       5118.9     255945.2   (1 pass)
-scan creeps: C++ snapshot        2000        127.0         63.5   (1 pass)
-getObjectsByPrototype              50        235.6       4712.9   (1 call)
+getTicks()                       1000        877.5        877.5   (1 call)
+creep.hits()                     2000       4458.1       2229.0   (1 property)
+scan creeps: val handles           60       4183.1      69717.8   (1 pass)
+take snapshot                      60       4534.0      75566.5   (1 pass)
+scan creeps: C++ snapshot        2000         67.3         33.7   (1 pass)
+bulk snapshot (1 crossing)        200       5409.5      27047.4   (1 pass)
+scan creeps: bulk buffer         2000        115.6         57.8   (1 pass)
+getObjectsByPrototype             200       1125.8       5628.8   (1 call)
+
+wasm memory: ~1 MB used of 16 MB
 ```
 
 Per single read:
 
-| | ns per read | vs a C++ add |
-|---|---|---|
-| property through a val handle | ~1 830 | ~1 400x |
-| field from a C++ snapshot | ~0.45 | ~0.35x |
+| | ns per read |
+|---|---|
+| property through a val handle | ~500 |
+| field from WASM memory | ~0.24 |
 
-**A property read through a handle costs about 1.8 microseconds.** The tick
-budget is 100 ms, so a bot gets roughly **55 000 property reads per tick**.
+**A property read through a handle costs about half a microsecond.** With a
+100 ms tick budget that is roughly **200 000 property reads per tick** -- far
+more headroom than the first, warm-up-inflated run suggested.
 
-`getObjectsByPrototype()` is ~4.7 microseconds for 28 creeps, about 170 ns per
-object, paid once per prototype per tick before you read a single field.
+### Where the half microsecond goes
 
-### The interesting part
+The bulk snapshot enumerates the creeps and then reads the same 140 fields, but
+from JavaScript. Subtracting the enumeration gives the cost of a property read
+that never crosses the boundary at all:
 
-Comparing the same benchmark under Node (`npm run bench`) against the Arena:
+| | ns per read |
+|---|---|
+| reading an Arena object's property, from JS | ~150 |
+| the WASM boundary on top of that | ~350 |
+| **total, through a handle** | **~500** |
 
-| | Node | Arena | ratio |
-|---|---|---|---|
-| property through a handle | ~120-300 ns | ~1 830 ns | **~10x worse** |
-| field from a snapshot | ~0.45 ns | ~0.45 ns | same |
-| per object in `getObjectsByPrototype` | ~160 ns | ~170 ns | same |
+So roughly **70% of a handle read is the crossing** and 30% is the Arena's own
+object being read at all. A snapshot removes the first part and pays the second
+once.
 
-The bulk array call did *not* get more expensive under isolated-vm, and neither
-did WASM-local memory. Only the individual round trips did. Whatever the Arena's
-sandbox costs, it costs it **per crossing**, so the fix is to make fewer
-crossings rather than to do less work.
+That also explains why the bulk snapshot is only 3x cheaper than the naive one
+here, against 8x under Node: the Arena's game objects are themselves expensive
+to read, and no amount of batching makes that part go away.
 
-### The naive snapshot was a straw man
+### An unresolved discrepancy
 
-The `take snapshot` row above builds the snapshot by reading each handle from
-C++, which costs exactly what a handle scan costs -- it crosses the boundary
-once per field. That is not how a snapshot backend would be built.
+`creep.hits()` measured in isolation reports ~2 230 ns, while the same kind of
+read inside the scan works out at ~500 ns. Repeatedly reading one property of
+one object should be the *faster* case, not 4x slower, and no explanation has
+survived scrutiny yet.
 
-A real one hands JavaScript a typed view of WASM memory and lets it fill the
-buffer: **one crossing for the whole world, regardless of how many fields each
-object has.** `bulk snapshot (1 crossing)` measures that. Under Node, with 50
-creeps:
+Treat the per-read figure as a range of roughly 500-2 200 ns. The scan number is
+the one used above, because scanning is what bots actually do.
 
-| | ns per pass | vs one handle pass |
-|---|---|---|
-| handle scan | ~93 000 | 1x |
-| naive snapshot (C++ reads handles) | ~72 000 | 0.8x |
-| **bulk snapshot (JS fills memory)** | **~9 000** | **0.10x** |
+## Is 16 MB of heap enough?
 
-So the break-even is not one pass over the world. It is **about a tenth of a
-pass**: a bot that reads the world once already pays ten times more through
-handles than it would through a snapshot.
+The benchmark reports actual usage. On the real game a bot doing ordinary work
+sits at about **1 MB of 16 MB**, and most of that is the 1 MB stack.
 
-This is consistent with the Arena measurement showing that the bulk
-`getObjectsByPrototype()` call did not degrade under isolated-vm while
-individual property reads got 10x worse. The sandbox charges per crossing, and
-a bulk snapshot makes exactly one.
-
-### Caveats on those numbers
-
-The run above used 20 iterations and a warm-up of three, and it showed: taking a
-snapshot appeared 3.5x cheaper than the handle scan performing the identical
-reads, which cannot be true. The first pass-level benchmark was paying V8's
-tier-up on the next one's behalf.
-
-`measure()` now warms up for `iterations / 2 + 8`, and the pass-level benchmarks
-run 60 iterations instead of 20. After that change the two agree locally to
-within 1%, as they should. **The absolute figures above are therefore an upper
-bound on the handle cost; re-run to get clean ones.**
-
-Also note:
-
-- **`getCpuTime()` is itself a crossing**, at ~1.7 microseconds on the Arena.
-  Each measurement makes two of them, which is noise against these totals but
-  worth knowing if you time your own bot.
-- **`cpuTimeLimit` is in nanoseconds.** The typings give no unit; the raw value
-  is 1e8, which is 100 ms read as nanoseconds and absurd read as anything else.
-  The first tick gets 1e9, i.e. one second.
-- **The simulator is [an approximation](../sim/FIDELITY.md).** Local numbers
-  tell you about the boundary, not about a match.
+Raising `INITIAL_MEMORY` is the way to get more. **Do not turn on
+`ALLOW_MEMORY_GROWTH`**: growing detaches the WASM `ArrayBuffer`, and every
+JS-side view over it -- including the one `snapshotCreeps` writes through --
+becomes detached, with writes silently going nowhere.
+`cmake/ArenaBot.cmake` records the full reasoning next to the flag.
 
 ## What to conclude
 

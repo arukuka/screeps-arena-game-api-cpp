@@ -107,6 +107,11 @@ export function createHost({
      * Reading the same data through handles costs ~1.8us *per field* on the
      * real game.
      *
+     * The view is only valid for the duration of this call, and only because
+     * the module is built with ALLOW_MEMORY_GROWTH=0. If growth is ever turned
+     * on, a heap that grows detaches this buffer and these writes go nowhere
+     * without erroring. See cmake/ArenaBot.cmake.
+     *
      * @param {Int32Array} view  a view onto WASM memory, sized by the caller
      * @returns {number} how many creeps were written; fields per creep is 5
      */

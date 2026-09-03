@@ -73,8 +73,21 @@ function(arena_add_bot target)
     -sEXPORTED_RUNTIME_METHODS=
 
     # --- memory ---
-    # A fixed heap keeps allocation off the per-tick CPU budget. Raise
-    # INITIAL_MEMORY rather than enabling growth if the bot needs more.
+    # A fixed heap. If a bot needs more, raise INITIAL_MEMORY -- do not turn
+    # growth on. Three reasons, in order of how badly they bite:
+    #
+    #  1. Growing detaches the WASM ArrayBuffer and replaces it. Every JS-side
+    #     TypedArray over that buffer becomes detached: writes go nowhere,
+    #     silently. `emscripten::typed_memory_view` hands exactly such a view to
+    #     JavaScript -- see snapshotCreeps in js/host.mjs -- so this is not a
+    #     hypothetical hazard for this library, it is load-bearing.
+    #  2. Growth happens when malloc happens, i.e. mid-tick, and the Arena bills
+    #     wall-clock CPU per tick. A fixed heap has no such spike.
+    #  3. A fixed heap fails at startup, visibly. Growth fails on the tick that
+    #     needed it, in the middle of a match, possibly at tick 800.
+    #
+    # 16 MB is not tight: `npm run bench` reports actual usage, and a bot
+    # doing ordinary work sits near 1 MB, most of which is the stack below.
     -sALLOW_MEMORY_GROWTH=0
     -sINITIAL_MEMORY=16MB
     -sSTACK_SIZE=1MB
