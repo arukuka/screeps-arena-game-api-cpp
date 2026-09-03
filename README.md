@@ -391,7 +391,7 @@ Promise の reject として届く。診断は必ず `loop()` から出す (上�
 include/arena/   公開ヘッダ
 src/             WASM ブリッジと エントリポイント
 testing/         ネイティブテスト用フェイク (arena::testing)
-cmake/           arena_add_bot() — 公開 CMake API
+cmake/           arena_add_bot() — 公開 CMake API と .clangd の生成
 js/              host table / WASM 起動 / Arena エントリ / rollup ヘルパ
 sim/             シミュレータ (world モデル + game/* のモック + ハーネス)
 scripts/         emsdk のセットアップとラッパ
@@ -417,6 +417,40 @@ install し、CMake でビルドしてシミュレータまで走らせる。
 
 `template/` は**テンプレートであると同時にこのテストの対象**なので、
 テンプレートが壊れたら CI が落ちる。テンプレートが腐らない。
+
+### エディタ (clangd)
+
+`cmake --preset wasm` を通すたびに `.clangd` が生成される (`npm run build:fixtures`
+でも `npm test` でも通る)。生成物なので `.gitignore` に入っている。
+
+放っておくと clangd はこのリポジトリを読めない。`compile_commands.json` が
+コンパイラとして `em++` を名指しするが、これは clang ではなく Python の
+ラッパなので clangd は駆動できず、ホストの既定値に落ちる。結果として
+`__EMSCRIPTEN__` が未定義になり、`#include` は Emscripten の sysroot ではなく
+ホストの SDK に解決される。ビルドは通るのにエディタだけが壊れる、という状態になる。
+
+生成される `.clangd` はこれを 2 つの断片で埋める。
+
+| 対象 | 見るデータベース | 効果 |
+|---|---|---|
+| `include/`, `src/`, ... | `build/wasm` | `em++ --cflags` が吐くフラグ (`-target wasm32-unknown-emscripten`, `--sysroot=...`) と、em++ が実際に起動する `clang++` を指定する |
+| `tests/`, `testing/` | `build/native` | こちらはホスト向けにビルドされる。WASM のフラグが混ざらないよう、断片を分けるしかない (`Add:` は断片をまたいで累積し、後から取り消せない) |
+
+フラグの出所は `em++ --cflags` なので、`.emscripten-version` を上げても設定が
+取り残されることはない。手で `.clangd` を置けばそちらが優先され、生成はされない。
+根拠は [`cmake/ClangdConfig.cmake`](cmake/ClangdConfig.cmake) に書いてある。
+
+パスの相対解決は 2 種類あり、ここを間違えるとヘッダが引けなくなる。
+
+| 設定 | 相対パスの基準 |
+|---|---|
+| `CompilationDatabase:` | **`.clangd` があるディレクトリ** |
+| `Compiler:`, `Add:` の中のパス | **コンパイルコマンドの `directory`** — つまりビルドディレクトリ |
+
+なので `build/wasm` を使う設定では、リポジトリ直下を指すのに `./` ではなく
+`../../` と書く。`npm run setup` で入れた `third_party/emsdk` はソースツリーの中に
+あるので生成側で相対パスに畳んでおり、ホームディレクトリのパスは残らない。
+`$EMSDK` で外部の SDK を使っている場合だけは絶対パスになる (相対では書けない)。
 
 ### CI
 

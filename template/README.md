@@ -14,6 +14,14 @@ npm run setup      # Emscripten を third_party/emsdk へ (初回のみ、数分
 
 必要なもの: Node 22+, CMake 3.25+, Ninja (macOS なら `brew install cmake ninja`)。
 
+### エディタ (clangd)
+
+`npm run build` を一度通すと `.clangd` が生成され、補完と定義ジャンプが効くようになる。
+
+生成物なので `.gitignore` に入っている。手で `.clangd` を置けばそちらが優先され、
+生成は行われない。仕組みは
+`node_modules/screeps-arena-game-api-cpp/cmake/ClangdConfig.cmake` に書いてある。
+
 ## 書く
 
 `src/bot.cc` の `arena::loop()` が毎 tick 呼ばれる。

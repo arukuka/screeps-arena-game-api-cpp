@@ -17,6 +17,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/ArenaBot.cmake")
 
+# Editor support. Writes .clangd next to the consumer's CMakeLists, because
+# clangd cannot work out on its own what em++ does to a compile command.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/ClangdConfig.cmake")
+arena_write_clangd_config()
+
 # ---------------------------------------------------------------------------
 # arena::headers -- the API a bot compiles against.
 # ---------------------------------------------------------------------------

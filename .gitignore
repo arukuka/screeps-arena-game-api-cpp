@@ -3,4 +3,5 @@ build/
 dist/
 third_party/emsdk/
 compile_commands.json
+.clangd
 .DS_Store
