@@ -7,7 +7,15 @@
 Screeps: Arena のボットを **C++ (WASM)** で書くためのライブラリ。
 ローカルシミュレータと、Emscripten を知らなくても済む CMake ヘルパ付き。
 
-実機で動作確認済み。Season 4 (Pain and Gain) にデプロイし **2000 tick 完走**している。
+> **動作確認中。** ブリッジは実機で動くことを確認済みだが、
+> API 全体のアリーナごとの確認はまだ終わっていない。下記参照。
+
+---
+
+## 動作確認の状況
+
+ブリッジ自体は実機で確認済み。Pain and Gain にデプロイしたボットが
+**2000 tick 完走**している。
 
 ```
 tick 1 (loop #1, previous 0)
@@ -16,8 +24,24 @@ tick 2 (loop #2, previous 1)
 tick 2000 (loop #2000, previous 1999)
 ```
 
-`previous` が前 tick の値を保持しているので、WASM のヒープが試合を通じて
-生存していることも実機で確認できている。
+`previous` が前 tick の値を保持していることが、WASM のヒープが試合を通じて
+生存している証拠。あわせて WebAssembly が使えること、16MB のヒープを
+確保できることもプローブで確認している。
+
+ただしこのボットが呼んでいたのは `getTicks()` だけである。
+残りの API — `getObjectsByPrototype()`、creep や構造物の行動、経路探索、
+描画 — は[近似である](sim/FIDELITY.ja.md)シミュレータでしか動かしていない。
+そのため、アリーナごとに実機確認を進めている。
+
+- [ ] Pain and Gain: Basic level
+- [ ] Spawn and Swamp: Basic level
+- [ ] Escort Run: Basic level
+- [ ] Pain and Gain: Advanced level
+- [ ] Spawn and Swamp: Advanced level
+- [ ] Escort Run: Advanced level
+
+チェックが付くまでは、そのアリーナでの挙動は「動く」ではなく「未検証」として
+扱うこと。違いが見つかったら `sim/FIDELITY.ja.md` に反映する。
 
 ---
 
@@ -229,7 +253,7 @@ assert.equal(world.creep('c1').store.energy, 20);
 
 ## 未計測
 
-方式の成立自体は実機で確認済み。残っているのは性能。
+上のアリーナごとの確認とは別に、以下は一度も測っていない。
 
 - **WASM 起動の実 CPU コスト**。2000 tick 完走したので予算内には収まっているが、
   初回 tick でどれだけ使っているかは測っていない。`getCpuTime()` を生やせば分かる

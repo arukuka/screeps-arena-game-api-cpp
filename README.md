@@ -7,8 +7,15 @@
 Write Screeps: Arena bots in **C++, compiled to WebAssembly**. Comes with a
 local simulator and a CMake helper, so you never have to learn Emscripten.
 
-Verified on the real game: deployed to Season 4 (Pain and Gain) and **ran the
-full 2000 ticks**.
+> **Verification is still in progress.** The bridge works on the real game; the
+> full API has not yet been signed off arena by arena. See below.
+
+---
+
+## Verification status
+
+The bridge itself is confirmed against the real game. A bot deployed to Pain and
+Gain ran the **full 2000 ticks**:
 
 ```
 tick 1 (loop #1, previous 0)
@@ -17,8 +24,26 @@ tick 2 (loop #2, previous 1)
 tick 2000 (loop #2000, previous 1999)
 ```
 
-`previous` holds the value from the tick before, which is the real game
-confirming that the WASM heap survives for the whole match.
+`previous` holding the value from the tick before is the real game confirming
+that the WASM heap survives the whole match, and probes established that
+WebAssembly is available and that a 16 MB heap can be reserved.
+
+That bot, however, called only `getTicks()`. The rest of the API --
+`getObjectsByPrototype()`, creep and structure actions, the path finder, visuals
+-- has so far only been exercised against the simulator, which is
+[an approximation](sim/FIDELITY.md), not the real engine. So each arena is still
+being checked:
+
+- [ ] Pain and Gain: Basic level
+- [ ] Spawn and Swamp: Basic level
+- [ ] Escort Run: Basic level
+- [ ] Pain and Gain: Advanced level
+- [ ] Spawn and Swamp: Advanced level
+- [ ] Escort Run: Advanced level
+
+Until a box is ticked, treat behaviour on that arena as untested rather than
+working. If something turns out to differ, `sim/FIDELITY.md` is where the
+correction belongs.
 
 ---
 
@@ -235,7 +260,8 @@ before you tune anything fine-grained.
 
 ## Not measured
 
-The approach itself is confirmed on the real game. What is left is performance.
+Separate from the arena-by-arena checks above, these numbers have never been
+taken at all.
 
 - **The real CPU cost of starting the WASM.** It fits the budget -- 2000 ticks
   completed -- but nobody has measured how much of the first tick it eats.
