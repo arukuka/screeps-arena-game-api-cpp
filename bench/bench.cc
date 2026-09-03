@@ -53,6 +53,17 @@ struct CreepData {
 
 std::vector<CreepData> g_snapshot;
 
+/// The same data, filled by JavaScript writing straight into WASM memory.
+///
+/// This is what a snapshot backend would actually do. `takeSnapshot()` below
+/// builds the same thing by reading each handle from C++, which costs exactly
+/// what a handle scan costs -- it is the naive version, kept so the two can be
+/// told apart.
+std::vector<int32_t> g_bulk;
+
+/// Creeps the bulk buffer is sized for. Arenas are far smaller than this.
+constexpr int kMaxCreeps = 256;
+
 /// The five fields both scans read, so the two designs are compared on the
 /// same work rather than on whatever each happens to find convenient.
 constexpr int kFieldsPerCreep = 5;
@@ -129,8 +140,23 @@ void report() {
     // once. Below this many passes, handles win.
     const double saved = handleRead - snapshotRead;
     if (saved > 0) {
-      std::printf("  break-even at %.1f passes over the world per tick\n",
+      std::printf("  break-even at %.1f passes (naive snapshot)\n",
                   nsPerOp(*takeSnapshot) / saved);
+    }
+
+    // The comparison that decides the design: a snapshot built the way one
+    // actually would be, with JavaScript filling WASM memory in one crossing.
+    const Result* bulk = findResult("bulk snapshot (1 crossing)");
+    if (bulk != nullptr) {
+      const double bulkCost = nsPerOp(*bulk);
+      std::printf("\n  bulk snapshot         %10.1f ns  (one crossing for the lot)\n", bulkCost);
+      if (nsPerOp(*takeSnapshot) > 0) {
+        std::printf("  %.0fx cheaper than building it from C++\n",
+                    nsPerOp(*takeSnapshot) / bulkCost);
+      }
+      if (saved > 0) {
+        std::printf("  break-even at %.2f passes (bulk snapshot)\n", bulkCost / saved);
+      }
     }
   }
 
@@ -162,6 +188,23 @@ void scanSnapshot() {
     total += creep.hitsMax;
     total += creep.my ? 1 : 0;
   }
+  g_sink = total;
+}
+
+/// One crossing, regardless of how many fields each creep has.
+int bulkSnapshot() {
+  if (g_bulk.empty()) g_bulk.resize(static_cast<std::size_t>(kMaxCreeps) * kFieldsPerCreep);
+
+  // A typed view onto our own memory. Safe to hand out because the module is
+  // built with ALLOW_MEMORY_GROWTH=0, so the heap cannot move underneath it.
+  const emscripten::val view(emscripten::typed_memory_view(g_bulk.size(), g_bulk.data()));
+  return arena::detail::api().call<int>("snapshotCreeps", view);
+}
+
+/// Reads the bulk buffer, to confirm it costs the same as the struct scan.
+void scanBulk(int count) {
+  long long total = 0;
+  for (int i = 0; i < count * kFieldsPerCreep; ++i) total += g_bulk[i];
   g_sink = total;
 }
 
@@ -245,12 +288,24 @@ void loop() {
       break;
 
     case 8:
+      // What a snapshot backend would really cost: JavaScript fills a view of
+      // WASM memory, one crossing for the whole world.
+      measure("bulk snapshot (1 crossing)", "1 pass", 200, [] { g_sink = bulkSnapshot(); });
+      break;
+
+    case 9: {
+      const int count = bulkSnapshot();
+      measure("scan creeps: bulk buffer", "1 pass", 2000, [count] { scanBulk(count); });
+      break;
+    }
+
+    case 10:
       // Fetching the array is a crossing of its own, and a bot does it every
       // tick for every prototype it cares about.
       measure("getObjectsByPrototype", "1 call", 200, [] { g_sink = static_cast<long long>(creeps().size()); });
       break;
 
-    case 9:
+    case 11:
       report();
       break;
 

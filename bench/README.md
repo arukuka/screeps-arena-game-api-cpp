@@ -57,6 +57,32 @@ did WASM-local memory. Only the individual round trips did. Whatever the Arena's
 sandbox costs, it costs it **per crossing**, so the fix is to make fewer
 crossings rather than to do less work.
 
+### The naive snapshot was a straw man
+
+The `take snapshot` row above builds the snapshot by reading each handle from
+C++, which costs exactly what a handle scan costs -- it crosses the boundary
+once per field. That is not how a snapshot backend would be built.
+
+A real one hands JavaScript a typed view of WASM memory and lets it fill the
+buffer: **one crossing for the whole world, regardless of how many fields each
+object has.** `bulk snapshot (1 crossing)` measures that. Under Node, with 50
+creeps:
+
+| | ns per pass | vs one handle pass |
+|---|---|---|
+| handle scan | ~93 000 | 1x |
+| naive snapshot (C++ reads handles) | ~72 000 | 0.8x |
+| **bulk snapshot (JS fills memory)** | **~9 000** | **0.10x** |
+
+So the break-even is not one pass over the world. It is **about a tenth of a
+pass**: a bot that reads the world once already pays ten times more through
+handles than it would through a snapshot.
+
+This is consistent with the Arena measurement showing that the bulk
+`getObjectsByPrototype()` call did not degrade under isolated-vm while
+individual property reads got 10x worse. The sandbox charges per crossing, and
+a bulk snapshot makes exactly one.
+
 ### Caveats on those numbers
 
 The run above used 20 iterations and a warm-up of three, and it showed: taking a
@@ -82,23 +108,25 @@ Also note:
 
 ## What to conclude
 
-Taking a snapshot costs roughly what one handle-based pass costs, because it
-performs the same reads. Every pass after the first is then essentially free.
-So the break-even is around one pass over the world per tick:
+A bulk snapshot costs about a tenth of a single handle-based pass, and every
+pass after it is essentially free. There is no crossover point worth arguing
+about: **if the data is going to be read at all, it is cheaper to snapshot it.**
 
-- A bot that looks at each object **once** a tick gains nothing from a snapshot.
-  Handles are simpler, keep the result codes actions return, and cost the same.
-- A bot that looks at the world **repeatedly** -- scoring targets, comparing
-  plans, running a search -- pays the full boundary cost every time. At 1.8
-  microseconds a read, a search that evaluates a few thousand candidates against
-  live handles will not fit in 100 ms. A snapshot turns all but the first pass
-  into ordinary memory reads.
+That is a stronger result than the first run suggested, and it came from fixing
+the benchmark rather than from any change to the library.
 
-So the answer is not "handles are too slow" but "handles are too slow to read
-more than once". Read the world into your own structures at the top of the tick
-if you are going to traverse it repeatedly; otherwise leave it alone.
+What it does *not* argue for is batching actions. The measurements say the cost
+is in reads:
 
-The library keeps handles as the default because they read like the JS API and
-because most bots are in the first category. [docs/DESIGN.md](../docs/DESIGN.md)
-describes what moving the whole API to a snapshot would cost -- chiefly that
-actions could no longer return a result in the same tick.
+| | cost | how often a bot does it |
+|---|---|---|
+| property read | ~1.8 us (Arena) | objects x fields x passes |
+| action (`harvest`, `moveTo`, ...) | one crossing | once or twice per creep |
+
+So the shape worth building is a **hybrid**: reads served from a snapshot,
+actions still sent immediately through the handle. That keeps
+`if (creep.harvest(s) == ERR_NOT_IN_RANGE)` working -- the pattern every Screeps
+player writes -- while removing the per-field cost that actually hurts.
+
+Crucially, that combination changes no signatures, so bot code does not have to
+know which backend it is on. See [docs/DESIGN.md](../docs/DESIGN.md).

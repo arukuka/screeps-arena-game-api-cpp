@@ -94,6 +94,39 @@ export function createHost({
     CostMatrix: pathFinder?.CostMatrix,
     Visual: visual?.Visual,
 
+    /**
+     * Bulk-copies every creep into WASM memory in a single crossing.
+     *
+     * EXPERIMENTAL. This is the prototype of a snapshot backend, kept here so
+     * `bench/` can measure it against the handle-based reads the object model
+     * currently uses.
+     *
+     * The point is that the cost does not scale with the number of fields:
+     * C++ hands over a typed view of its own memory and JavaScript fills it,
+     * so 5 fields per creep cost one crossing rather than five per creep.
+     * Reading the same data through handles costs ~1.8us *per field* on the
+     * real game.
+     *
+     * @param {Int32Array} view  a view onto WASM memory, sized by the caller
+     * @returns {number} how many creeps were written; fields per creep is 5
+     */
+    snapshotCreeps: (view) => {
+      const live = utils.getObjectsByPrototype(byName.Creep);
+      const count = Math.min(live.length, Math.floor(view.length / 5));
+
+      let at = 0;
+      for (let index = 0; index < count; index += 1) {
+        const creep = live[index];
+        view[at] = creep.x;
+        view[at + 1] = creep.y;
+        view[at + 2] = creep.hits;
+        view[at + 3] = creep.hitsMax;
+        view[at + 4] = creep.my ? 1 : 0;
+        at += 5;
+      }
+      return count;
+    },
+
     // --- the constants that <arena/constants.h> refuses to guess at, exposed
     // so C++ can read the real values instead.
     OBSTACLE_OBJECT_TYPES: constants?.OBSTACLE_OBJECT_TYPES,
