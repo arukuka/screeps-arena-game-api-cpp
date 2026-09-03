@@ -88,8 +88,16 @@ describe('consuming the published package', { timeout: TIMEOUT_MS }, () => {
     // plus the native tests, which link arena::testing rather than the bridge.
     const output = run('npm test');
 
-    // ctest swallows the executable's own stdout, so assert on its verdict.
-    assert.match(output, /100% tests passed out of 1/, output);
+    // These assertions only confirm the suites actually ran: a non-zero exit
+    // would already have thrown out of run(). Keep them loose about wording,
+    // because both tools below phrase their summary differently depending on
+    // the version installed, and pinning either phrasing means a green local
+    // run and a red CI one.
+    //
+    // ctest swallows the executable's own stdout, so its verdict is all there
+    // is. CMake 3.28 says "100% tests passed, 0 tests failed out of 1";
+    // CMake 4.x drops the middle clause.
+    assert.match(output, /100% tests passed(?:, 0 tests failed)? out of [1-9]\d*/, output);
 
     // ...and on the template's own sim suite, which drives the compiled WASM.
     assert.match(output, /reads the game through the WASM boundary/, output);
@@ -97,8 +105,7 @@ describe('consuming the published package', { timeout: TIMEOUT_MS }, () => {
     // `node --test` picks its reporter by Node version when stdout is not a
     // TTY: TAP ("# fail 0") through Node 22, spec ("i fail 0") from Node 24.
     // Accept either, rather than pinning a reporter in the template to suit
-    // this test. Asserting a non-zero pass count as well keeps a suite that
-    // silently ran nothing from looking like success.
+    // this test.
     assert.match(output, /^(?:\u2139|#) fail 0$/m, output);
     assert.match(output, /^(?:\u2139|#) pass [1-9]\d*$/m, output);
   });

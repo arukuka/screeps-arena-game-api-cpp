@@ -77,6 +77,30 @@ inside the source tree, so the generator folds it to a relative path and no home
 directory ever appears. Only an external SDK via `$EMSDK` produces an absolute
 path, because a relative one cannot be written.
 
+### Reproducing a Linux CI failure locally
+
+Two CI failures so far were invisible on macOS: `node --test` changes its
+default reporter by Node version, and `ctest` changes its summary wording by
+CMake version. Both were assertions in `tests/external/consume.test.mjs`
+scraping a tool's human-readable output.
+
+The runner image is close enough to reproduce in a container:
+
+```sh
+docker run --rm -v "$PWD":/src:ro -w /work emscripten/emsdk:$(cat .emscripten-version) bash -c '
+  apt-get update -qq && apt-get install -y -qq ninja-build
+  git clone -q /src /work/repo && cd /work/repo
+  npm ci && npm run test:external
+'
+```
+
+`git clone` from the read-only mount rather than using it directly, so the run
+sees a clean checkout the way CI does -- a stray `build/` or `node_modules/` in
+the working tree is exactly the sort of thing that hides a failure.
+
+The image ships Node 24 and CMake 3.28. To check the other end of the supported
+range, drop a Node 22 tarball on the PATH first.
+
 ### CI
 
 `.github/workflows/ci.yml` runs two jobs on push and pull request.

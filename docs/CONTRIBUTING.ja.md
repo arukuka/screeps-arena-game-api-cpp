@@ -74,6 +74,30 @@ install し、CMake でビルドしてシミュレータまで走らせる。
 あるので生成側で相対パスに畳んでおり、ホームディレクトリのパスは残らない。
 `$EMSDK` で外部の SDK を使っている場合だけは絶対パスになる (相対では書けない)。
 
+### Linux の CI 失敗をローカルで再現する
+
+これまでの CI 失敗 2 件はどちらも macOS では見えなかった。`node --test` は
+既定レポーターを Node のバージョンで変え、`ctest` はサマリの文言を CMake の
+バージョンで変える。いずれも `tests/external/consume.test.mjs` が
+外部ツールの人間向け出力を決め打ちしていたのが原因。
+
+ランナーのイメージはコンテナで十分近く再現できる。
+
+```sh
+docker run --rm -v "$PWD":/src:ro -w /work emscripten/emsdk:$(cat .emscripten-version) bash -c '
+  apt-get update -qq && apt-get install -y -qq ninja-build
+  git clone -q /src /work/repo && cd /work/repo
+  npm ci && npm run test:external
+'
+```
+
+読み取り専用マウントを直接使わず `git clone` するのは、CI と同じクリーンな
+チェックアウトを見せるため。作業ツリーに残った `build/` や `node_modules/` は、
+まさに失敗を隠すたぐいのもの。
+
+イメージには Node 24 と CMake 3.28 が入っている。サポート範囲のもう一端を
+見るなら、先に Node 22 の tarball を PATH に置く。
+
 ### CI
 
 `.github/workflows/ci.yml` が push / PR で 2 ジョブを回す。
