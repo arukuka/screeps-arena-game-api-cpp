@@ -8,7 +8,13 @@
     "type": "git",
     "url": "git+https://github.com/arukuka/screeps-arena-game-api-cpp.git"
   },
-  "keywords": ["screeps", "screeps-arena", "wasm", "emscripten", "cpp"],
+  "keywords": [
+    "screeps",
+    "screeps-arena",
+    "wasm",
+    "emscripten",
+    "cpp"
+  ],
   "exports": {
     ".": "./js/index.mjs",
     "./arena": "./js/arena.mjs",
@@ -21,6 +27,7 @@
     "arena-emsdk-setup": "scripts/setup-emsdk.sh"
   },
   "files": [
+    ".emscripten-version",
     "CMakeLists.txt",
     "cmake/",
     "include/",
@@ -32,17 +39,14 @@
   ],
   "scripts": {
     "setup": "scripts/setup-emsdk.sh",
-
     "build:fixtures": "scripts/with-emsdk.sh cmake --preset wasm && scripts/with-emsdk.sh cmake --build --preset wasm",
-
     "test": "npm run test:cpp && npm run test:sim && npm run test:external",
     "test:cpp": "cmake --preset native && cmake --build --preset native && ctest --preset native",
     "test:sim": "npm run build:fixtures && node --test tests/harness.test.mjs tests/world.test.mjs",
     "test:external": "node --test tests/external/consume.test.mjs",
-
     "clean": "rm -rf build dist"
   },
-  "devDependencies": {
-    "rollup": "^4.60.0"
+  "engines": {
+    "node": ">=22.15"
   }
 }

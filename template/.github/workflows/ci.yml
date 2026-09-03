@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Your bot logic, compiled for the host against arena::testing. No Emscripten,
+  # so this is the job that tells you quickly when the C++ is wrong.
+  native:
+    name: native tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      # Once you commit package-lock.json, switch this to `npm ci` and add
+      # `cache: npm` to the setup-node step above.
+      - run: npm install --no-audit --no-fund
+
+      - run: npm run test:cpp
+
+  # The compiled WASM driven through the simulated game API -- the closest a
+  # check can get to the Arena without deploying.
+  wasm:
+    name: wasm + simulator
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      # Once you commit package-lock.json, switch this to `npm ci` and add
+      # `cache: npm` to the setup-node step above.
+      - run: npm install --no-audit --no-fund
+
+      # The pinned version lives in the library, so the cache key follows it.
+      - name: Read the pinned Emscripten version
+        id: emscripten
+        run: |
+          version="$(cat node_modules/screeps-arena-game-api-cpp/.emscripten-version)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Emscripten SDK
+        uses: actions/cache@v4
+        with:
+          path: third_party/emsdk
+          key: emsdk-${{ runner.os }}-${{ steps.emscripten.outputs.version }}
+
+      - name: Install Emscripten
+        run: npm run setup
+
+      - run: npm run test:sim
+
+      # Builds the file you would actually deploy, so a bundling problem shows
+      # up here rather than in a match.
+      - name: Bundle
+        run: npm run bundle

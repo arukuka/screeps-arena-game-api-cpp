@@ -1,5 +1,7 @@
 # screeps-arena-game-api-cpp
 
+[![CI](https://github.com/arukuka/screeps-arena-game-api-cpp/actions/workflows/ci.yml/badge.svg)](https://github.com/arukuka/screeps-arena-game-api-cpp/actions/workflows/ci.yml)
+
 Screeps: Arena のボットを **C++ (WASM)** で書くためのライブラリ。
 ローカルシミュレータと、Emscripten を知らなくても済む CMake ヘルパ付き。
 
@@ -329,6 +331,25 @@ install し、CMake でビルドしてシミュレータまで走らせる。
 `template/` は**テンプレートであると同時にこのテストの対象**なので、
 テンプレートが壊れたら CI が落ちる。テンプレートが腐らない。
 
+### CI
+
+`.github/workflows/ci.yml` が push / PR で 2 ジョブを回す。
+
+| ジョブ | OS | 内容 |
+|---|---|---|
+| `native` | ubuntu, macos | `npm run test:cpp`。Emscripten 不要なので 1 分以内に落ちる |
+| `wasm` | ubuntu, macos | emsdk を入れて `test:sim` と `test:external` |
+
+macOS も回すのは意図的。シェルスクリプトは macOS の **bash 3.2** で動く必要があり、
+bash 4+ の機能が紛れ込んでも他に気づく場所が無い。
+
+Emscripten のバージョンは **`.emscripten-version` が唯一の出所**で、
+`scripts/setup-emsdk.sh` とキャッシュキーの両方がこれを読む。
+CI が独自に版を書くと、いつか静かにずれる。
+
+CI は開発者と同じ `npm run setup` を実行する。セットアップスクリプトが壊れたとき、
+最初にクローンした人ではなく CI が気づくようにするため。
+
 ---
 
 ## テンプレートを別リポジトリとして公開する
@@ -342,6 +363,14 @@ GitHub 側で Settings → "Template repository" を有効にする。
 `template/package.json` の依存は既に
 `github:arukuka/screeps-arena-game-api-cpp` を指しているので、
 push 後はそのまま `npm install` できる。
+
+---
+
+## 公開前に決めること
+
+- **`LICENSE` ファイルが無い。** `package.json` には MIT と書いてあるが
+  (私が置いた既定値)、実ファイルは無い。別のライセンスにするなら
+  `package.json` の `license` も併せて直すこと
 
 ---
 

@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The fast lane. No Emscripten, so it fails in under a minute when the C++ is
+  # simply wrong -- and it runs on both platforms, which is the only thing here
+  # that would catch a compiler disagreement.
+  native:
+    name: native tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install build tools
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update
+            sudo apt-get install -y ninja-build
+          else
+            brew install ninja
+          fi
+          cmake --version
+          ninja --version
+
+      - run: npm run test:cpp
+
+  # Everything that needs a WASM toolchain: the bridge, the simulator, and the
+  # pack-install-build check that the package is usable from outside.
+  #
+  # Both platforms on purpose. The shell scripts run on macOS's bash 3.2, and
+  # nothing else in CI would notice if they grew a bash 4+ dependency.
+  wasm:
+    name: wasm + external (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install build tools
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update
+            sudo apt-get install -y ninja-build
+          else
+            brew install ninja
+          fi
+          cmake --version
+          ninja --version
+
+      # Single source of truth, shared with scripts/setup-emsdk.sh, so the cache
+      # key and the installed SDK cannot drift apart.
+      - name: Read the pinned Emscripten version
+        id: emscripten
+        run: echo "version=$(cat .emscripten-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Emscripten SDK
+        uses: actions/cache@v4
+        with:
+          path: third_party/emsdk
+          key: emsdk-${{ runner.os }}-${{ steps.emscripten.outputs.version }}
+
+      # Deliberately the same command a developer runs, so a broken setup script
+      # fails here rather than for the first person who clones the repo.
+      - name: Install Emscripten
+        run: npm run setup
+
+      - run: npm ci
+
+      - name: WASM bridge and simulator
+        run: npm run test:sim
+
+      # Packs the library as npm would publish it, installs that tarball into a
+      # copy of template/, and builds and runs the result. Catches a missing
+      # entry in `files`, an `exports` path that does not resolve, and a
+      # dist/main.mjs that is not pure ASCII.
+      - name: External consumption
+        run: npm run test:external
