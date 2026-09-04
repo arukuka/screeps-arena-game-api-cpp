@@ -121,6 +121,42 @@ function ensureConsoleMethods(log) {
 }
 
 /**
+ * Fills in Date if the runtime does not provide it.
+ *
+ * Screeps: Arena runs bots inside isolated-vm without `Date` (to ensure
+ * determinism). However, Emscripten's filesystem and stdio runtime (used by
+ * C++ <iostream> or POSIX wrappers) update file/stream timestamps using
+ * `Date.now()`. Without Date, any write to stdout or stream initialization
+ * throws `ReferenceError: Date is not defined`.
+ */
+function ensureDate() {
+  if (typeof globalThis.Date !== 'undefined') {
+    return;
+  }
+
+  globalThis.Date = class Date {
+    #ms;
+    constructor(ms = 0) {
+      this.#ms = Number(ms);
+    }
+    getTime() { return this.#ms; }
+    valueOf() { return this.#ms; }
+    getFullYear() { return 1970; }
+    getMonth() { return 0; }
+    getDate() { return 1; }
+    getHours() { return 0; }
+    getMinutes() { return 0; }
+    getSeconds() { return 0; }
+    getMilliseconds() { return 0; }
+    toISOString() { return '1970-01-01T00:00:00.000Z'; }
+    toTimeString() { return '00:00:00 GMT+0000'; }
+    toDateString() { return 'Thu Jan 01 1970'; }
+    toString() { return 'Thu Jan 01 1970 00:00:00 GMT+0000'; }
+    static now() { return 0; }
+  };
+}
+
+/**
  * @param {(moduleArg: object) => Promise<object>} createArenaBot
  *   the Emscripten factory, i.e. the default export of the `.mjs` that
  *   `arena_add_bot()` produced. Passed in rather than imported, because only
@@ -130,6 +166,7 @@ function ensureConsoleMethods(log) {
  */
 export function createBot(createArenaBot, host) {
   ensureConsoleMethods(host.log);
+  ensureDate();
 
   const module = {
     arena: host,

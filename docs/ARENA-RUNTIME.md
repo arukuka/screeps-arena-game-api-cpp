@@ -45,6 +45,21 @@ define, so the fallback is skipped entirely and `.bind` throws. Worse, this runs
 instantiation. `tests/harness.test.mjs` covers two cases -- a console with only
 `log()`, and a frozen one -- and both were confirmed to fail without the shim.
 
+### `Date` is undefined
+
+The isolated-vm sandbox removes `Date` from global scope to enforce determinism.
+However, Emscripten's filesystem and stdio layer (which gets pulled in when C++
+code includes `<iostream>` or uses streams) updates stream timestamps using
+`Date.now()`. Without a shim, writing to stdout/stderr via `std::cout` throws:
+
+```
+ReferenceError: Date is not defined
+```
+
+`ensureDate()` in `js/runtime.mjs` installs a lightweight deterministic stub
+if `globalThis.Date` is absent, allowing `<iostream>` and `std::cout` to work
+transparently in real matches without crashes.
+
 ### Console output during module evaluation never reaches the match log
 
 Only what a tick writes gets through. Always report diagnostics from `loop()`.

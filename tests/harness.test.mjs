@@ -90,6 +90,41 @@ describe('WASM bot against the simulator', () => {
     });
   });
 
+  it('starts on a runtime where Date is undefined', () => {
+    const originalDate = globalThis.Date;
+    delete globalThis.Date;
+    try {
+      const match = createMatch({ createArenaBot });
+      match.run(1);
+
+      assert.equal(match.logs[0], 'tick 1 (loop #1, previous 0)');
+    } finally {
+      globalThis.Date = originalDate;
+    }
+  });
+
+  it('runs bots using std::cout (<iostream>) when Date is undefined', async () => {
+    const { default: createProbeBot } = await import('../build/fixtures/api_probe_bot.mjs');
+    const originalDate = globalThis.Date;
+    delete globalThis.Date;
+    try {
+      const world = new World({ width: 100, height: 100 });
+      world.setTerrainAt(0, 0, 1);
+      world.addCreep({ id: 'c1', my: true, x: 20, y: 20, body: ['move', 'attack', 'ranged_attack', 'heal', 'carry'], store: { energy: 100 } });
+      world.addCreep({ id: 'c2', my: true, x: 21, y: 20, body: ['move', 'carry'], store: { energy: 50 } });
+      world.addCreep({ id: 'foe1', my: false, x: 25, y: 25, body: ['move', 'attack'] });
+      world.addFlag({ id: 'f1', x: 50, y: 50 });
+
+      const match = createMatch({ createArenaBot: createProbeBot, world });
+      match.run(1);
+
+      assert.ok(match.logs.some((line) => line.includes('[PHASE 1] Environment & Metadata API')));
+      assert.ok(match.logs.some((line) => line.includes('[PASS] getTicks()')));
+    } finally {
+      globalThis.Date = originalDate;
+    }
+  });
+
   it('interleaves two matches without mixing up their worlds', () => {
     const slow = createMatch({ createArenaBot, world: new World() });
     const fast = createMatch({ createArenaBot, world: new World() });

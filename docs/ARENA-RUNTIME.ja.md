@@ -46,6 +46,21 @@ Module 経由の指定では間に合わない。
 `tests/harness.test.mjs` に「`log()` だけの console」「凍結された console」の
 2 ケースを置いてある (シムを外すと両方落ちることを確認済み)。
 
+### `Date` が存在しない
+
+isolated-vm サンドボックスは決定性を保つため、グローバルスコープから `Date` を削除している。
+しかし Emscripten のファイルシステムおよび標準入出力層（C++ で `<iostream>` やストリームを
+使用した際にリンクされる）は、`Date.now()` を用いてストリームの更新時刻を記録しようとする。
+そのためシムがない状態で `std::cout` を呼び出すと、次のようなランタイムエラーが発生する:
+
+```
+ReferenceError: Date is not defined
+```
+
+`js/runtime.mjs` の `ensureDate()` が、`globalThis.Date` が未定義の場合に軽量な決定論的
+スタブを注入するため、`<iostream>` や `std::cout` を使ったボットも実機でクラッシュせずに
+そのまま動作する。
+
 ### モジュール評価中の console 出力は試合ログに出ない
 
 tick が書いたものだけが届く。診断は必ず `loop()` から出すこと。
