@@ -21,6 +21,10 @@ set(ARENA_CLANGD_NATIVE_PATHS "tests;testing" CACHE STRING
     "Directories under the project root that clangd should read from the native \
 build instead: they are compiled for the host, not for WASM")
 
+set(ARENA_CLANGD_WASM_EXTRA_PATHS "tests/fixtures" CACHE STRING
+    "Directories under ARENA_CLANGD_NATIVE_PATHS that are compiled for WASM \
+rather than native")
+
 # Line 1 of anything we wrote. A .clangd without it belongs to the user, and
 # clobbering someone's own editor config is not ours to do.
 set(ARENA_CLANGD_MARKER
@@ -110,23 +114,54 @@ function(arena_write_clangd_config)
   # the absolute path.
   set(native_regexes "")
   foreach(dir IN LISTS ARENA_CLANGD_NATIVE_PATHS)
-    if(native_regexes)
-      string(APPEND native_regexes ", ")
+    if(EXISTS "${CMAKE_SOURCE_DIR}/${dir}")
+      if(native_regexes)
+        string(APPEND native_regexes ", ")
+      endif()
+      string(APPEND native_regexes "\"${dir}/.*\"")
     endif()
-    string(APPEND native_regexes "\"${dir}/.*\"")
+  endforeach()
+
+  set(wasm_extra_regexes "")
+  foreach(dir IN LISTS ARENA_CLANGD_WASM_EXTRA_PATHS)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/${dir}")
+      if(wasm_extra_regexes)
+        string(APPEND wasm_extra_regexes ", ")
+      endif()
+      string(APPEND wasm_extra_regexes "\"${dir}/.*\"")
+    endif()
   endforeach()
 
   set(wasm_condition "")
+  set(wasm_extra_fragment "")
   set(native_fragment "")
   if(native_regexes)
     set(wasm_condition "If:\n  PathExclude: [${native_regexes}]\n")
+
+    if(wasm_extra_regexes)
+      set(wasm_extra_fragment
+          "---\n"
+          "If:\n  PathMatch: [${wasm_extra_regexes}]\n"
+          "CompileFlags:\n"
+          "  CompilationDatabase: ${wasm_db}\n"
+          "${compiler_line}"
+          "  Add:\n"
+          "${add_block}")
+      string(JOIN "" wasm_extra_fragment ${wasm_extra_fragment})
+    endif()
+
     # Host-compiled sources need the opposite of everything above: no sysroot,
     # no wasm triple, and the include paths of the `native` preset (GoogleTest
     # among them). A second fragment is the only way to say that, because Add:
     # accumulates across fragments and cannot be taken back.
+    set(native_exclude_line "")
+    if(wasm_extra_regexes)
+      set(native_exclude_line "  PathExclude: [${wasm_extra_regexes}]\n")
+    endif()
     set(native_fragment
         "---\n"
         "If:\n  PathMatch: [${native_regexes}]\n"
+        "${native_exclude_line}"
         "CompileFlags:\n  CompilationDatabase: build/native\n")
     string(JOIN "" native_fragment ${native_fragment})
   endif()
@@ -142,6 +177,7 @@ function(arena_write_clangd_config)
     "${compiler_line}"
     "  Add:\n"
     "${add_block}"
+    "${wasm_extra_fragment}"
     "${native_fragment}"
   )
   message(STATUS "clangd: wrote ${out} (database: ${wasm_db})")
