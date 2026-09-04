@@ -18,6 +18,7 @@
 
 #include <emscripten/val.h>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -36,8 +37,10 @@ class Structure : public GameObject {
   static constexpr const char* kPrototype = "Structure";
   using GameObject::GameObject;
 
-  std::optional<int> hits() const { return detail::optionalInt(handle_["hits"]); }
-  std::optional<int> hitsMax() const { return detail::optionalInt(handle_["hitsMax"]); }
+  std::optional<int> hits() const { return optionalScalar(detail::Field::kHits, "hits"); }
+  std::optional<int> hitsMax() const {
+    return optionalScalar(detail::Field::kHitsMax, "hitsMax");
+  }
 };
 
 /// A structure that belongs to somebody.
@@ -47,11 +50,7 @@ class OwnedStructure : public Structure {
   using Structure::Structure;
 
   /// true for yours, false for hostile, absent for neutral.
-  std::optional<bool> my() const {
-    const emscripten::val value = handle_["my"];
-    if (value.isUndefined() || value.isNull()) return std::nullopt;
-    return value.as<bool>();
-  }
+  std::optional<bool> my() const { return optionalFlag(detail::Field::kMy, "my"); }
 };
 
 /// An energy source. Harvestable by creeps with a WORK part.
@@ -60,8 +59,10 @@ class Source : public GameObject {
   static constexpr const char* kPrototype = "Source";
   using GameObject::GameObject;
 
-  int energy() const { return handle_["energy"].as<int>(); }
-  int energyCapacity() const { return handle_["energyCapacity"].as<int>(); }
+  int energy() const { return scalar(detail::Field::kEnergy, "energy"); }
+  int energyCapacity() const {
+    return scalar(detail::Field::kEnergyCapacity, "energyCapacity");
+  }
 };
 
 /// A dropped pile of resource.
@@ -70,7 +71,7 @@ class Resource : public GameObject {
   static constexpr const char* kPrototype = "Resource";
   using GameObject::GameObject;
 
-  int amount() const { return handle_["amount"].as<int>(); }
+  int amount() const { return scalar(detail::Field::kAmount, "amount"); }
   std::string resourceType() const { return handle_["resourceType"].as<std::string>(); }
 };
 
@@ -81,11 +82,7 @@ class Flag : public GameObject {
   using GameObject::GameObject;
 
   /// true/false when owned, absent when neutral.
-  std::optional<bool> my() const {
-    const emscripten::val value = handle_["my"];
-    if (value.isUndefined() || value.isNull()) return std::nullopt;
-    return value.as<bool>();
-  }
+  std::optional<bool> my() const { return optionalFlag(detail::Field::kMy, "my"); }
 };
 
 /// A structure under construction.
@@ -94,14 +91,14 @@ class ConstructionSite : public GameObject {
   static constexpr const char* kPrototype = "ConstructionSite";
   using GameObject::GameObject;
 
-  std::optional<int> progress() const { return detail::optionalInt(handle_["progress"]); }
-  std::optional<int> progressTotal() const { return detail::optionalInt(handle_["progressTotal"]); }
-
-  std::optional<bool> my() const {
-    const emscripten::val value = handle_["my"];
-    if (value.isUndefined() || value.isNull()) return std::nullopt;
-    return value.as<bool>();
+  std::optional<int> progress() const {
+    return optionalScalar(detail::Field::kProgress, "progress");
   }
+  std::optional<int> progressTotal() const {
+    return optionalScalar(detail::Field::kProgressTotal, "progressTotal");
+  }
+
+  std::optional<bool> my() const { return optionalFlag(detail::Field::kMy, "my"); }
 
   /// The structure this becomes once finished, if the game exposes it yet.
   std::optional<Structure> structure() const {
@@ -121,12 +118,20 @@ class Creep : public GameObject {
 
   std::vector<BodyPart> body() const;
 
-  int fatigue() const { return handle_["fatigue"].as<int>(); }
-  int hits() const { return handle_["hits"].as<int>(); }
-  int hitsMax() const { return handle_["hitsMax"].as<int>(); }
-  bool my() const { return handle_["my"].as<bool>(); }
-  bool spawning() const { return handle_["spawning"].as<bool>(); }
-  Store store() const { return Store(handle_["store"]); }
+  int fatigue() const { return scalar(detail::Field::kFatigue, "fatigue"); }
+  int hits() const { return scalar(detail::Field::kHits, "hits"); }
+  int hitsMax() const { return scalar(detail::Field::kHitsMax, "hitsMax"); }
+
+  bool my() const {
+    const std::int32_t value = snapshot(detail::Field::kMy);
+    return value != detail::kAbsent ? value != 0 : handle_["my"].as<bool>();
+  }
+  bool spawning() const {
+    const std::int32_t value = snapshot(detail::Field::kSpawning);
+    return value != detail::kAbsent ? value != 0 : handle_["spawning"].as<bool>();
+  }
+
+  Store store() const { return Store(handle_, record_); }
 
   /// Number of live parts of a type -- the quantity most decisions turn on.
   int countParts(std::string_view type) const;
@@ -221,7 +226,7 @@ class StructureSpawn : public OwnedStructure {
   static constexpr const char* kPrototype = "StructureSpawn";
   using OwnedStructure::OwnedStructure;
 
-  Store store() const { return Store(handle_["store"]); }
+  Store store() const { return Store(handle_, record_); }
 
   /// Present only while a creep is being spawned.
   std::optional<Spawning> spawning() const {
@@ -242,8 +247,8 @@ class StructureTower : public OwnedStructure {
   static constexpr const char* kPrototype = "StructureTower";
   using OwnedStructure::OwnedStructure;
 
-  Store store() const { return Store(handle_["store"]); }
-  int cooldown() const { return handle_["cooldown"].as<int>(); }
+  Store store() const { return Store(handle_, record_); }
+  int cooldown() const { return scalar(detail::Field::kCooldown, "cooldown"); }
 
   int attack(const GameObject& target) const {
     return handle_.call<int>("attack", target.handle());
@@ -259,7 +264,7 @@ class StructureContainer : public OwnedStructure {
   static constexpr const char* kPrototype = "StructureContainer";
   using OwnedStructure::OwnedStructure;
 
-  Store store() const { return Store(handle_["store"]); }
+  Store store() const { return Store(handle_, record_); }
 };
 
 /// Holds energy that spawns may draw on.
@@ -268,7 +273,7 @@ class StructureExtension : public OwnedStructure {
   static constexpr const char* kPrototype = "StructureExtension";
   using OwnedStructure::OwnedStructure;
 
-  Store store() const { return Store(handle_["store"]); }
+  Store store() const { return Store(handle_, record_); }
 };
 
 /// Blocks every creep.

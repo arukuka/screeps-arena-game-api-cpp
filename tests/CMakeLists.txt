@@ -14,6 +14,13 @@ if(EMSCRIPTEN)
     OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/fixtures"
   )
   target_include_directories(probe_bot PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+
+  # Checks the snapshot against the handle it replaced. WASM only: there is no
+  # object model in a native build to compare.
+  arena_add_bot(object_probe
+    SOURCES fixtures/object_probe.cc
+    OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/fixtures"
+  )
   return()
 endif()
 

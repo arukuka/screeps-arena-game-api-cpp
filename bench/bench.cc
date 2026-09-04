@@ -43,32 +43,14 @@ struct Result {
 
 std::vector<Result> g_results;
 
-/// A creep as a snapshot design would hold it: plain fields, already in WASM
-/// memory, reachable without touching JavaScript.
-struct CreepData {
-  int x;
-  int y;
-  int hits;
-  int hitsMax;
-  bool my;
-};
 
-std::vector<CreepData> g_snapshot;
-
-/// The same data, filled by JavaScript writing straight into WASM memory.
-///
-/// This is what a snapshot backend would actually do. `takeSnapshot()` below
-/// builds the same thing by reading each handle from C++, which costs exactly
-/// what a handle scan costs -- it is the naive version, kept so the two can be
-/// told apart.
-std::vector<int32_t> g_bulk;
-
-/// Creeps the bulk buffer is sized for. Arenas are far smaller than this.
-constexpr int kMaxCreeps = 256;
 
 /// The five fields both scans read, so the two designs are compared on the
 /// same work rather than on whatever each happens to find convenient.
 constexpr int kFieldsPerCreep = 5;
+
+/// How many creeps the scans covered, for the report.
+int g_creepCount = 0;
 
 template <typename Body>
 void measure(const char* name, const char* unit, long iterations, Body body) {
@@ -111,23 +93,22 @@ void report() {
   }
 
   // The comparison the whole exercise exists for.
-  const Result* viaHandles = findResult("scan creeps: val handles");
-  const Result* viaSnapshot = findResult("scan creeps: C++ snapshot");
-  const Result* takeSnapshot = findResult("take snapshot");
+  const Result* viaHandles = findResult("scan: raw handles");
+  const Result* viaSnapshot = findResult("scan: hybrid accessors");
+  const Result* takeSnapshot = findResult("snapshot + wrap");
 
   if (viaHandles != nullptr && viaSnapshot != nullptr && takeSnapshot != nullptr) {
     const double handleRead = nsPerOp(*viaHandles);
     const double snapshotRead = nsPerOp(*viaSnapshot);
 
-    std::printf("\nreading %d creeps x %d fields:\n", static_cast<int>(g_snapshot.size()),
-                kFieldsPerCreep);
-    std::printf("  through val handles   %10.1f ns\n", handleRead);
-    std::printf("  from a C++ snapshot   %10.1f ns\n", snapshotRead);
+    std::printf("\nreading %d creeps x %d fields:\n", g_creepCount, kFieldsPerCreep);
+    std::printf("  raw handles           %10.1f ns\n", handleRead);
+    std::printf("  hybrid accessors      %10.1f ns\n", snapshotRead);
 
     if (snapshotRead > 0) {
       std::printf("  handles are %.0fx slower\n", handleRead / snapshotRead);
     }
-    std::printf("  taking the snapshot   %10.1f ns  (paid once per tick)\n",
+    std::printf("  snapshot + wrap       %10.1f ns  (paid once per tick)\n",
                 nsPerOp(*takeSnapshot));
 
     const double budget = arena::arenaInfo().cpuTimeLimit;
@@ -142,24 +123,11 @@ void report() {
     // once. Below this many passes, handles win.
     const double saved = handleRead - snapshotRead;
     if (saved > 0) {
-      std::printf("  break-even at %.1f passes (naive snapshot)\n",
+      std::printf("  break-even at %.2f passes over the world\n",
                   nsPerOp(*takeSnapshot) / saved);
     }
 
-    // The comparison that decides the design: a snapshot built the way one
-    // actually would be, with JavaScript filling WASM memory in one crossing.
-    const Result* bulk = findResult("bulk snapshot (1 crossing)");
-    if (bulk != nullptr) {
-      const double bulkCost = nsPerOp(*bulk);
-      std::printf("\n  bulk snapshot         %10.1f ns  (one crossing for the lot)\n", bulkCost);
-      if (nsPerOp(*takeSnapshot) > 0) {
-        std::printf("  %.0fx cheaper than building it from C++\n",
-                    nsPerOp(*takeSnapshot) / bulkCost);
-      }
-      if (saved > 0) {
-        std::printf("  break-even at %.2f passes (bulk snapshot)\n", bulkCost / saved);
-      }
-    }
+
   }
 
   std::printf("\n(sink %lld -- ignore, it exists to defeat the optimiser)\n", g_sink);
@@ -167,8 +135,23 @@ void report() {
 
 std::vector<Creep> creeps() { return arena::getObjectsByPrototype<Creep>(); }
 
-/// Reads the five fields off a handle. One JS round trip per field.
+/// The pre-hybrid path: five JS round trips per creep, straight off the handle.
+/// Kept so the change can be measured rather than asserted.
 void scanViaHandles(const std::vector<Creep>& live) {
+  long long total = 0;
+  for (const Creep& creep : live) {
+    const emscripten::val& h = creep.handle();
+    total += h["x"].as<int>();
+    total += h["y"].as<int>();
+    total += h["hits"].as<int>();
+    total += h["hitsMax"].as<int>();
+    total += h["my"].as<bool>() ? 1 : 0;
+  }
+  g_sink = total;
+}
+
+/// The hybrid path: the same accessors a bot writes, served from the snapshot.
+void scanHybrid(const std::vector<Creep>& live) {
   long long total = 0;
   for (const Creep& creep : live) {
     total += creep.x();
@@ -180,43 +163,13 @@ void scanViaHandles(const std::vector<Creep>& live) {
   g_sink = total;
 }
 
-/// Reads the same five fields out of WASM memory. No JS involved.
-void scanSnapshot() {
-  long long total = 0;
-  for (const CreepData& creep : g_snapshot) {
-    total += creep.x;
-    total += creep.y;
-    total += creep.hits;
-    total += creep.hitsMax;
-    total += creep.my ? 1 : 0;
-  }
-  g_sink = total;
+/// A fresh snapshot plus wrapping, which is what a tick actually pays once.
+/// `beginTick()` drops the cache so each iteration measures the real thing.
+std::size_t freshSnapshot() {
+  arena::detail::beginTick();
+  return creeps().size();
 }
 
-/// One crossing, regardless of how many fields each creep has.
-int bulkSnapshot() {
-  if (g_bulk.empty()) g_bulk.resize(static_cast<std::size_t>(kMaxCreeps) * kFieldsPerCreep);
-
-  // A typed view onto our own memory. Safe to hand out because the module is
-  // built with ALLOW_MEMORY_GROWTH=0, so the heap cannot move underneath it.
-  const emscripten::val view(emscripten::typed_memory_view(g_bulk.size(), g_bulk.data()));
-  return arena::detail::api().call<int>("snapshotCreeps", view);
-}
-
-/// Reads the bulk buffer, to confirm it costs the same as the struct scan.
-void scanBulk(int count) {
-  long long total = 0;
-  for (int i = 0; i < count * kFieldsPerCreep; ++i) total += g_bulk[i];
-  g_sink = total;
-}
-
-void takeSnapshot(const std::vector<Creep>& live) {
-  g_snapshot.clear();
-  g_snapshot.reserve(live.size());
-  for (const Creep& creep : live) {
-    g_snapshot.push_back({creep.x(), creep.y(), creep.hits(), creep.hitsMax(), creep.my()});
-  }
-}
 
 }  // namespace
 
@@ -239,32 +192,30 @@ void loop() {
                   arenaInfo().name.c_str(), arenaInfo().season.c_str(),
                   arenaInfo().cpuTimeLimit / 1e6,
                   arenaInfo().cpuTimeLimitFirstTick / 1e6);
-      std::printf("creeps visible: %zu\n\n", creeps().size());
+      g_creepCount = static_cast<int>(creeps().size());
+      std::printf("creeps visible: %d\n\n", g_creepCount);
 
       // Timing overhead first: every other number here is two getCpuTime()
-      // calls lighter than it looks, and getCpuTime() is itself a boundary
-      // crossing.
-      measure("getCpuTime()", "1 call", 1000, [] { g_sink = static_cast<long long>(getCpuTime()); });
+      // calls lighter than it looks, and getCpuTime() is itself a crossing.
+      measure("getCpuTime()", "1 call", 1000,
+              [] { g_sink = static_cast<long long>(getCpuTime()); });
       break;
     }
 
     case 2:
-      // The floor. Pure C++, no boundary anywhere -- what WASM costs when left
-      // alone.
+      // The floor. Pure C++, no boundary anywhere.
       measure("C++ arithmetic", "1 add", 200000, [] { g_sink = g_sink + 1; });
       break;
 
     case 3:
-      // The cheapest possible crossing: no arguments, an integer back.
+      // The cheapest crossing there is: no arguments, an integer back.
       measure("getTicks()", "1 call", 1000, [] { g_sink = getTicks(); });
       break;
 
     case 4: {
-      // One property off one handle, which is the unit the object model is
-      // built out of.
       const std::vector<Creep> live = creeps();
       if (live.empty()) {
-        std::printf("no creeps; skipping handle benchmarks\n");
+        std::printf("no creeps; skipping the object benchmarks\n");
         break;
       }
       const Creep creep = live.front();
@@ -273,56 +224,44 @@ void loop() {
     }
 
     case 5: {
+      // The pre-hybrid path, for comparison.
       const std::vector<Creep> live = creeps();
-      measure("scan creeps: val handles", "1 pass", 60, [&live] { scanViaHandles(live); });
+      measure("scan: raw handles", "1 pass", 60, [&live] { scanViaHandles(live); });
       break;
     }
 
     case 6: {
+      // The path a bot actually writes.
       const std::vector<Creep> live = creeps();
-      measure("take snapshot", "1 pass", 60, [&live] { takeSnapshot(live); });
+      measure("scan: hybrid accessors", "1 pass", 2000, [&live] { scanHybrid(live); });
       break;
     }
 
     case 7:
-      // The same reads the handle scan did, once the data is in WASM memory.
-      measure("scan creeps: C++ snapshot", "1 pass", 2000, [] { scanSnapshot(); });
+      // What reads cost a tick, once: one crossing to fill the snapshot, plus
+      // wrapping the objects.
+      measure("snapshot + wrap", "1 call", 200,
+              [] { g_sink = static_cast<long long>(freshSnapshot()); });
       break;
 
     case 8:
-      // What a snapshot backend would really cost: JavaScript fills a view of
-      // WASM memory, one crossing for the whole world.
-      measure("bulk snapshot (1 crossing)", "1 pass", 200, [] { g_sink = bulkSnapshot(); });
+      // A second query in the same tick hits the cache.
+      measure("2nd query (cached)", "1 call", 2000,
+              [] { g_sink = static_cast<long long>(creeps().size()); });
       break;
 
     case 9: {
-      const int count = bulkSnapshot();
-      measure("scan creeps: bulk buffer", "1 pass", 2000, [count] { scanBulk(count); });
+      // Is 16 MB enough? Report it rather than argue. `sbrk(0)` is how far the
+      // allocator has grown into the heap; the gap to the total is headroom.
+      const std::size_t total = emscripten_get_heap_size();
+      const std::size_t used = reinterpret_cast<std::size_t>(sbrk(0));
+      std::printf("\nwasm memory: %.2f MB used of %.2f MB total (%.1f%%)\n",
+                  used / 1048576.0, total / 1048576.0,
+                  100.0 * static_cast<double>(used) / static_cast<double>(total));
       break;
     }
 
     case 10:
-      // Fetching the array is a crossing of its own, and a bot does it every
-      // tick for every prototype it cares about.
-      measure("getObjectsByPrototype", "1 call", 200, [] { g_sink = static_cast<long long>(creeps().size()); });
-      break;
-
-    case 11: {
-      // Is 16 MB enough? Rather than argue about it, report what the bot is
-      // actually using. `sbrk(0)` is how far the allocator has grown into the
-      // heap; the gap to the total is headroom.
-      const std::size_t total = emscripten_get_heap_size();
-      const std::size_t used = reinterpret_cast<std::size_t>(sbrk(0));
-
-      std::printf("\nwasm memory: %.2f MB used of %.2f MB total (%.1f%%)\n",
-                  used / 1048576.0, total / 1048576.0,
-                  100.0 * static_cast<double>(used) / static_cast<double>(total));
-      std::printf("  snapshot buffer alone: %.2f KB for %d creeps\n",
-                  g_bulk.size() * sizeof(int32_t) / 1024.0, kMaxCreeps);
-      break;
-    }
-
-    case 12:
       report();
       break;
 

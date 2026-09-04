@@ -42,9 +42,36 @@ construction.
 
 ## Object representation
 
-Today a game object is an `emscripten::val` handle. That maps one-to-one onto
-the JS API and reads well, at the cost of one round trip across the JS boundary
-per property.
+A game object holds an `emscripten::val` handle *and* an index into a per-tick
+snapshot. Reads come from the snapshot; actions go through the handle. The
+signatures are identical either way, so bot code never learns which is which.
+
+### Why not one or the other
+
+Handles alone cost a boundary crossing per property. A pure snapshot would have
+to batch actions too, and batching actions means giving up the result code --
+`if (creep.harvest(s) == ERR_NOT_IN_RANGE)` is the shape every Screeps bot is
+written in, and it cannot survive an action that answers next tick.
+
+The measurements said that was an unnecessary trade. Reads happen
+objects x fields x passes times; actions happen once or twice per creep. Making
+reads cheap is nearly all of the benefit, and it costs nothing in expressiveness.
+
+### What is and is not snapshotted
+
+`arena::detail::Field` lists the numeric fields, filled by `snapshotByPrototype`
+in `js/host.mjs`. Strings, arrays and nested objects stay on the handle: a
+fixed-width int32 record cannot carry them.
+
+Objects from `getObjectById()` and `getObjects()` carry no record and read
+through their handles. That is correct but slow per field; prefer
+`getObjectsByPrototype()` when reading many fields.
+
+The layouts are duplicated across the language boundary, so
+`tests/snapshot.test.mjs` parses the enum out of the header and fails if they
+drift, and `tests/objects.test.mjs` reads every field both ways in WASM and
+fails on any disagreement. A snapshot that is fast and subtly wrong would not
+crash -- the bot would simply decide on the wrong numbers.
 
 The Arena bills wall-clock CPU per tick (`arenaInfo.cpuTimeLimit`), so once
 you are seriously running 50 creeps and CPU starts to bite, consider moving to a

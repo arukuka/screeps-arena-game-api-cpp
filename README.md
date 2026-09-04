@@ -179,12 +179,17 @@ The C++ side has the same shape: one set of declarations in
 - `src/bridge.cc` -- the real bridge, through `emscripten::val` (`arena::api`)
 - `testing/fake.cc` -- fakes for native unit tests (`arena::testing`)
 
-### Game objects are `emscripten::val` handles
+### Reads come from a snapshot, actions go to the handle
 
-A game object is a thin wrapper around the JavaScript object the Arena handed
-us, so **reading a property crosses the JS boundary**. That is why a property in
-the JS API is a *method* here (`creep.hits()`): the cost is deliberately visible
-at the call site.
+`getObjectsByPrototype()` copies every numeric field of every matching object
+into WASM memory in **one crossing**, and the objects it returns read from
+there. Actions still cross immediately, so they still return the game's result
+code.
+
+A property in the JS API is a *method* here (`creep.hits()`) because it was once
+a boundary crossing, and because it still is for anything the snapshot cannot
+carry -- strings, arrays, nested objects, and objects obtained through
+`getObjectById()` or `getObjects()`.
 
 ```cpp
 for (const Creep& creep : getObjectsByPrototype<Creep>()) {
@@ -195,12 +200,14 @@ for (const Creep& creep : getObjectsByPrototype<Creep>()) {
 }
 ```
 
-The Arena bills wall-clock CPU per tick, and a read costs about 0.5 microseconds
-there, some 70% of which is the crossing rather than the work. In a hot loop,
-hoist a property you read
-repeatedly into a local; if you traverse the world more than once a tick, copy
-what you need into your own structs first. [bench/README.md](bench/README.md)
-has the numbers.
+Measured locally, that takes a scan of 50 creeps from ~57 000 ns down to
+~420 ns: about **135x**. The snapshot itself costs ~19 000 ns a tick, so it pays
+for itself after roughly a third of one pass over the world.
+
+None of that changes what you write. `bot.cc` is the same either way; only where
+the number comes from changed. [bench/README.md](bench/README.md) has the
+numbers, and [docs/DESIGN.md](docs/DESIGN.md) explains why actions were left
+alone.
 
 ### What native tests can and cannot see
 

@@ -59,10 +59,25 @@ std::optional<T> getObjectById(const std::string& id) {
 }
 
 /// Every object of one prototype, e.g. `getObjectsByPrototype<Creep>()`.
+///
+/// This is where the per-tick snapshot is taken: one crossing copies every
+/// numeric field of every object of this prototype into WASM memory, and the
+/// returned objects read from there. Calling it again in the same tick is
+/// nearly free -- the slice is cached.
+///
+/// Objects obtained any other way (`getObjectById()`, `getObjects()`) read
+/// through their handles instead, which is correct but far slower per field.
 template <typename T>
 std::vector<T> getObjectsByPrototype() {
-  return detail::toVector<T>(detail::api().call<emscripten::val>(
-      "getObjectsByPrototype", std::string(T::kPrototype)));
+  const detail::Slice& slice = detail::snapshotByPrototype(T::kPrototype);
+
+  std::vector<T> objects;
+  objects.reserve(static_cast<std::size_t>(slice.count));
+  for (int index = 0; index < slice.count; ++index) {
+    objects.emplace_back(slice.objects[index],
+                         slice.base >= 0 ? slice.base + index : -1);
+  }
+  return objects;
 }
 
 /// Options shared by the pathfinding helpers.

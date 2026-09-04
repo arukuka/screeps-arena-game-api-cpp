@@ -174,12 +174,16 @@ C++ 側も同じ形で、`include/arena/utils.h` の宣言に対し実装が 2 �
 - `src/bridge.cc` — `emscripten::val` 経由の本物のブリッジ (`arena::api`)
 - `testing/fake.cc` — ネイティブ単体テスト用のフェイク (`arena::testing`)
 
-### オブジェクトは `emscripten::val` ハンドル
+### 読み取りはスナップショット、行動はハンドル
 
-ゲームオブジェクトは JS オブジェクトへの薄いラッパで、
-**プロパティ読み取りのたびに JS 境界を越える**。そのため JS の
-プロパティは C++ では**メソッド**になっている (`creep.hits()`)。
-コストが呼び出し側から見えるようにするための意図的な差異。
+`getObjectsByPrototype()` が、該当する全オブジェクトの数値フィールドを
+**境界越え 1 回**で WASM メモリへ写す。返されたオブジェクトはそこから読む。
+行動は従来どおり即時に境界を越えるので、ゲームの結果コードがそのまま返る。
+
+JS のプロパティが C++ で**メソッド**なのは (`creep.hits()`)、かつて境界越え
+だったからであり、スナップショットに載らないもの — 文字列・配列・入れ子の
+オブジェクト、および `getObjectById()` / `getObjects()` 由来のオブジェクト —
+では今も境界越えだから。
 
 ```cpp
 for (const Creep& creep : getObjectsByPrototype<Creep>()) {
@@ -190,11 +194,13 @@ for (const Creep& creep : getObjectsByPrototype<Creep>()) {
 }
 ```
 
-Arena は tick あたりの実時間 CPU で課金され、実機での 1 回の読み取りは
-約 0.5 マイクロ秒。うち約 70% は仕事ではなく**境界越え**そのもの。
-ホットループで同じプロパティを何度も読むなら
-ローカルに退避し、世界を tick に 2 回以上走査するなら自前の構造体へ写すこと。
-数値は [bench/README.ja.md](bench/README.ja.md)。
+ローカル計測で、creep 50 体の走査が約 57,000ns から約 420ns になった
+（**約 135 倍**）。スナップショット自体は tick あたり約 19,000ns なので、
+世界を 3 分の 1 周もしないうちに元が取れる。
+
+**書くコードは何も変わらない。** `bot.cc` はどちらでも同じで、数値の出所だけが
+変わった。数値は [bench/README.ja.md](bench/README.ja.md)、行動を触らなかった
+理由は [docs/DESIGN.ja.md](docs/DESIGN.ja.md)。
 
 ### ネイティブテストで見えるもの / 見えないもの
 

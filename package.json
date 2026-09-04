@@ -45,7 +45,7 @@
     "bench:deploy": "npm run build:fixtures && rollup -c bench/rollup.config.mjs && cp dist/bench.mjs \"${ARENA_DIR:?set ARENA_DIR to your arena source folder}/main.mjs\"",
     "test": "npm run test:cpp && npm run test:sim && npm run test:external",
     "test:cpp": "cmake --preset native && cmake --build --preset native && ctest --preset native",
-    "test:sim": "npm run build:fixtures && node --test tests/constants.test.mjs tests/engine.test.mjs tests/harness.test.mjs tests/world.test.mjs",
+    "test:sim": "npm run build:fixtures && node --test tests/constants.test.mjs tests/snapshot.test.mjs tests/objects.test.mjs tests/engine.test.mjs tests/harness.test.mjs tests/world.test.mjs",
     "test:external": "node --test tests/external/consume.test.mjs",
     "clean": "rm -rf build dist"
   },

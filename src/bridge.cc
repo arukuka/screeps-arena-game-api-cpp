@@ -12,6 +12,8 @@
 
 #include <emscripten/val.h>
 
+#include <cstdint>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -53,6 +55,63 @@ emscripten::val toVal(Position position) {
 std::optional<int> optionalInt(const emscripten::val& value) {
   if (value.isUndefined() || value.isNull()) return std::nullopt;
   return value.as<int>();
+}
+
+// --- the per-tick snapshot -------------------------------------------------
+
+namespace {
+
+/// Records the buffer holds. Arenas have far fewer objects than this; a
+/// prototype that would overflow it falls back to handle reads rather than
+/// truncating, so the worst case is slow, never wrong.
+constexpr int kMaxRecords = 2048;
+
+std::vector<std::int32_t> g_records;
+int g_nextRecord = 0;
+std::map<std::string, Slice> g_slices;
+
+}  // namespace
+
+void beginTick() {
+  g_nextRecord = 0;
+  g_slices.clear();
+}
+
+std::int32_t snapshotValue(int record, Field field) {
+  return g_records[static_cast<std::size_t>(record) * kFieldCount +
+                   static_cast<std::size_t>(field)];
+}
+
+const Slice& snapshotByPrototype(const std::string& prototype) {
+  const auto cached = g_slices.find(prototype);
+  if (cached != g_slices.end()) return cached->second;
+
+  if (g_records.empty()) {
+    g_records.assign(static_cast<std::size_t>(kMaxRecords) * kFieldCount, kAbsent);
+  }
+
+  const int base = g_nextRecord;
+  const std::size_t offset = static_cast<std::size_t>(base) * kFieldCount;
+
+  // JavaScript fills the buffer and hands back the objects, so one crossing
+  // buys both the data and the handles that actions need.
+  const emscripten::val view(
+      emscripten::typed_memory_view(g_records.size() - offset, g_records.data() + offset));
+  emscripten::val objects =
+      api().call<emscripten::val>("snapshotByPrototype", prototype, view);
+
+  Slice slice;
+  slice.count = objects["length"].as<int>();
+  slice.objects = std::move(objects);
+
+  // The host writes nothing it cannot fit. If it did not fit, every object in
+  // this slice reads through its handle instead.
+  if (base + slice.count <= kMaxRecords) {
+    slice.base = base;
+    g_nextRecord = base + slice.count;
+  }
+
+  return g_slices.emplace(prototype, std::move(slice)).first->second;
 }
 
 }  // namespace detail
@@ -178,6 +237,8 @@ int getTerrainAt(Position position) {
 }
 
 std::vector<GameObject> getObjects() {
+  // Not snapshotted: the result mixes prototypes, and the per-tick cache is
+  // keyed by prototype. Objects come back reading through their handles.
   return detail::toVector<GameObject>(
       detail::api().call<emscripten::val>("getObjects"));
 }

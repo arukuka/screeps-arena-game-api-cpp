@@ -9,7 +9,7 @@
 // Exported as a plain C function rather than through embind: the boundary
 // carries no arguments and no return value, so embind would only add code size
 // and per-call overhead. Everything interesting crosses the boundary in the
-// other direction (C++ -> JS), which `src/utils_wasm.cc` handles.
+// other direction (C++ -> JS), which `src/bridge.cc` handles.
 //
 // `arena_add_bot()` compiles this file into the bot executable directly instead
 // of pulling it from a static library, because nothing references the symbol
@@ -18,5 +18,13 @@
 #include <emscripten/emscripten.h>
 
 #include "arena/bot.h"
+#include "arena/object.h"
 
-extern "C" EMSCRIPTEN_KEEPALIVE void arena_loop() { arena::loop(); }
+extern "C" EMSCRIPTEN_KEEPALIVE void arena_loop() {
+  // Discard last tick's snapshot before the bot can read it. Doing this here
+  // rather than trusting the bot to ask means a stale world is not something
+  // anyone can forget about.
+  arena::detail::beginTick();
+
+  arena::loop();
+}
