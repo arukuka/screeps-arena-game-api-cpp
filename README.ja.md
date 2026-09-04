@@ -38,7 +38,7 @@ Season 4 (Pain and Gain) 実機へデプロイし、全 5 フェーズにわた�
 5. **Creep アクションインテント**: `move()`, `moveTo()`, `attack()`, `rangedAttack()`, `rangedMassAttack()`, `heal()`, `rangedHeal()`, `pull()`, `drop()`, `pickup()`, `transfer()`, `withdraw()`, `harvest()`, `build()`
 
 全 63 件のアサーションがパスし、その後も生存行動を継続して **2000 tick 完走**を確認している。
-（※ Pain and Gain は戦闘特化ルールのため、Creep に CARRY パートがなく `transfer()` は仕様通り `ERR_NO_BODYPART` を返し、新規作成した `ConstructionSite` の `progress` は未着工として `std::nullopt` となるが、これらを含めゲーム仕様通りのレスポンスが得られることを確認済み）
+（※ Pain and Gain は戦闘特化ルールのため、Creep に Store 容量がないため `transfer()` は仕様通り `ERR_INVALID_TARGET` (-7) を返し、新規作成した `ConstructionSite` の `progress` は未着工として `std::nullopt` となりますが、これらを含めゲーム仕様通りのレスポンスが得られることを確認済み）
 
 実機検証の実行方法:
 
