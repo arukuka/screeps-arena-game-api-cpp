@@ -9,8 +9,43 @@
 # directory, so a project consuming this from node_modules gets its own SDK.
 set -euo pipefail
 
-library_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve symlinks so BASH_SOURCE points to this script in the library,
+# even when invoked via npm's node_modules/.bin/arena-emsdk-setup symlink.
+if command -v realpath >/dev/null 2>&1; then
+  source_path="$(realpath "${BASH_SOURCE[0]}")"
+else
+  source_path="${BASH_SOURCE[0]}"
+  while [[ -L "${source_path}" ]]; do
+    link_target="$(readlink "${source_path}")"
+    if [[ "${link_target}" == /* ]]; then
+      source_path="${link_target}"
+    else
+      source_path="$(dirname "${source_path}")/${link_target}"
+    fi
+  done
+fi
+
+library_root="$(cd "$(dirname "${source_path}")/.." && pwd)"
+
+# Fallback: if .emscripten-version is not at library_root, search standard locations
+if [[ ! -f "${library_root}/.emscripten-version" ]]; then
+  if [[ -f "${PWD}/node_modules/screeps-arena-game-api-cpp/.emscripten-version" ]]; then
+    library_root="${PWD}/node_modules/screeps-arena-game-api-cpp"
+  elif [[ -f "${PWD}/.emscripten-version" ]]; then
+    library_root="${PWD}"
+  else
+    echo "error: cannot find .emscripten-version in ${library_root}" >&2
+    exit 1
+  fi
+fi
+
 emsdk_version="$(cat "${library_root}/.emscripten-version")"
+
+if [[ "${1:-}" == "--version" || "${1:-}" == "-v" ]]; then
+  echo "${emsdk_version}"
+  exit 0
+fi
+
 emsdk_dir="${PWD}/third_party/emsdk"
 
 if [[ ! -d "${emsdk_dir}/.git" ]]; then

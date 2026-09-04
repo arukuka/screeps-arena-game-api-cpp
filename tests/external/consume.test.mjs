@@ -83,6 +83,12 @@ describe('consuming the published package', { timeout: TIMEOUT_MS }, () => {
     if (workspace) rmSync(workspace, { recursive: true, force: true });
   });
 
+  it('resolves the pinned Emscripten version through arena-emsdk-setup bin symlink', () => {
+    const output = run('./node_modules/.bin/arena-emsdk-setup --version');
+    const expected = readFileSync(join(REPO, '.emscripten-version'), 'utf8').trim();
+    assert.equal(output.trim(), expected);
+  });
+
   it('builds the bot and passes the template test suite', () => {
     // Exercises arena_add_bot() from a project that only sees node_modules,
     // plus the native tests, which link arena::testing rather than the bridge.
