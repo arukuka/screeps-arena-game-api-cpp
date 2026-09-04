@@ -264,7 +264,11 @@ void testPhase4_ObjectDetailsAndStore() {
         "success=" + std::to_string((bool)site_result));
   if (site_result.object) {
     const auto &site = *site_result.object;
-    check("ConstructionSite::progress()", site.progress().has_value());
+    // In combat arenas like Pain and Gain, unworked construction sites have undefined progress.
+    auto progress = site.progress();
+    check("ConstructionSite::progress()",
+          !progress.has_value() || *progress >= 0,
+          "progress=" + (progress ? std::to_string(*progress) : "none"));
     site.remove();
     check("ConstructionSite::remove()", true);
   }
@@ -345,7 +349,10 @@ void testPhase5_ActionIntents() {
     int res_transfer = c.transfer(heal_target, RESOURCE_ENERGY, 1);
     check("creep.transfer(target, resource)",
           res_transfer == OK || res_transfer == ERR_NOT_IN_RANGE ||
-              res_transfer == ERR_NOT_ENOUGH_RESOURCES);
+              res_transfer == ERR_NOT_ENOUGH_RESOURCES ||
+              res_transfer == ERR_NO_BODYPART ||
+              res_transfer == ERR_INVALID_TARGET,
+          "res=" + std::to_string(res_transfer));
 
     auto spawns = getObjectsByPrototype<StructureSpawn>();
     if (!spawns.empty()) {

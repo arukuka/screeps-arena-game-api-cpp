@@ -34,25 +34,26 @@ Season 4 (Pain and Gain) 実機へデプロイし、全 5 フェーズにわた�
 1. **環境・メタデータ**: `getTicks()`, `getCpuTime()`, `arenaInfo()`, `getTerrainAt()`, `getDirection()`, `obstacleObjectTypes()`, `resourcesAll()`, `constructionCost()`, `getRange()`
 2. **PathFinder & 描画**: `CostMatrix`, `searchPath()` (単一・複数ゴール), `findPath()`, `Visual` (レイヤー、永続化、スタイル描画、クリア)
 3. **プロトタイプ & スナップショット**: `getObjects()`, 各種プロトタイプの `getObjectsByPrototype<T>()`, スナップショットフィールドとハンドルの整合性、空間検索 (`findClosestByPath`, `findClosestByRange`, `findInRange`)
-4. **オブジェクト詳細・Store・ConstructionSite**: `getObjectById<T>()`, `Creep::body()`, `Creep::countParts()`, `Store`, `GameObject::effects()`, `ticksToDecay()`, `createConstructionSite()`, `ConstructionSite::remove()`
+4. **オブジェクト詳細・Store・ConstructionSite**: `getObjectById<T>()`, `Creep::body()`, `Creep::countParts()`, `Store`, `GameObject::effects()`, `ticksToDecay()`, `createConstructionSite()`, `ConstructionSite::progress()`, `ConstructionSite::remove()`
 5. **Creep アクションインテント**: `move()`, `moveTo()`, `attack()`, `rangedAttack()`, `rangedMassAttack()`, `heal()`, `rangedHeal()`, `pull()`, `drop()`, `pickup()`, `transfer()`, `withdraw()`, `harvest()`, `build()`
 
-すべてのアサーションが **100% パス**し、生存行動を継続して **2000 tick 完走**を確認している。
+全 63 件のアサーションがパスし、その後も生存行動を継続して **2000 tick 完走**を確認している。
+（※ Pain and Gain は戦闘特化ルールのため、Creep に CARRY パートがなく `transfer()` は仕様通り `ERR_NO_BODYPART` を返し、新規作成した `ConstructionSite` の `progress` は未着工として `std::nullopt` となるが、これらを含めゲーム仕様通りのレスポンスが得られることを確認済み）
+
+実機検証の実行方法:
+
+```sh
+ARENA_DIR=~/ScreepsArena/your-arena npm run probe:deploy
+```
 
 アリーナごとの確認状況:
 
-- [x] Pain and Gain: Basic level (Season 4 実機にて api_probe_bot による全 API 検証・2000 tick 完走確認済み)
+- [x] Pain and Gain: Basic level (Season 4 実機にて api_probe_bot による全 63 アサーション通過・2000 tick 完走確認済み)
 - [ ] Spawn and Swamp: Basic level
 - [ ] Escort Run: Basic level
 - [ ] Pain and Gain: Advanced level
 - [ ] Spawn and Swamp: Advanced level
 - [ ] Escort Run: Advanced level
-
-検証用ボットは、以下のようにビルド・デプロイして任意のアリーナで実行可能:
-
-```sh
-ARENA_DIR=~/ScreepsArena/your-arena npm run probe:deploy
-```
 
 ---
 

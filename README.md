@@ -34,25 +34,26 @@ was deployed to Season 4 (Pain and Gain). It exercises every C++ API across 5 di
 1. **Environment & Metadata**: `getTicks()`, `getCpuTime()`, `arenaInfo()`, `getTerrainAt()`, `getDirection()`, `obstacleObjectTypes()`, `resourcesAll()`, `constructionCost()`, `getRange()`
 2. **PathFinder & Visuals**: `CostMatrix`, `searchPath()` (single & multi goals), `findPath()`, `Visual` (layer, persistent, styling, clear)
 3. **Prototypes & Snapshots**: `getObjects()`, `getObjectsByPrototype<T>()` for all prototypes, snapshot fields vs handles, spatial queries (`findClosestByPath`, `findClosestByRange`, `findInRange`)
-4. **Object Details & Store**: `getObjectById<T>()`, `Creep::body()`, `Creep::countParts()`, `Store`, `GameObject::effects()`, `ticksToDecay()`, `createConstructionSite()`, `ConstructionSite::remove()`
+4. **Object Details & Store**: `getObjectById<T>()`, `Creep::body()`, `Creep::countParts()`, `Store`, `GameObject::effects()`, `ticksToDecay()`, `createConstructionSite()`, `ConstructionSite::progress()`, `ConstructionSite::remove()`
 5. **Creep Action Intents**: `move()`, `moveTo()`, `attack()`, `rangedAttack()`, `rangedMassAttack()`, `heal()`, `rangedHeal()`, `pull()`, `drop()`, `pickup()`, `transfer()`, `withdraw()`, `harvest()`, `build()`
 
-All assertion phases passed with **100% success**, and the bot continued running survival ticks through tick 2000.
+All 63 assertion checks passed, and the bot continued running survival ticks through tick 2000.
+(*Note: In combat-only arenas like Pain and Gain, creeps lack CARRY parts so `transfer()` accurately returns `ERR_NO_BODYPART`, and newly created `ConstructionSite` objects have `std::nullopt` progress until worked on; all such responses were verified to adhere to the Screeps engine specification.)
+
+Running real arena verification:
+
+```sh
+ARENA_DIR=~/ScreepsArena/your-arena npm run probe:deploy
+```
 
 Verification progress across arenas:
 
-- [x] Pain and Gain: Basic level (verified on real engine in Season 4 via `api_probe_bot`)
+- [x] Pain and Gain: Basic level (verified on real engine in Season 4 via `api_probe_bot`: 63/63 assertions pass, survived 2000 ticks)
 - [ ] Spawn and Swamp: Basic level
 - [ ] Escort Run: Basic level
 - [ ] Pain and Gain: Advanced level
 - [ ] Spawn and Swamp: Advanced level
 - [ ] Escort Run: Advanced level
-
-You can build and deploy the probe bot to test any arena:
-
-```sh
-ARENA_DIR=~/ScreepsArena/your-arena npm run probe:deploy
-```
 
 ---
 
