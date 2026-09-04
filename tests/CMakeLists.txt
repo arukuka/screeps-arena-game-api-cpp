@@ -21,6 +21,12 @@ if(EMSCRIPTEN)
     SOURCES fixtures/object_probe.cc
     OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/fixtures"
   )
+
+  # Comprehensive real-machine verification bot covering all Screeps Arena APIs.
+  arena_add_bot(api_probe_bot
+    SOURCES fixtures/api_probe_bot.cc
+    OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/fixtures"
+  )
   return()
 endif()
 

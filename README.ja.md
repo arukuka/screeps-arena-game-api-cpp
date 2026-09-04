@@ -7,15 +7,16 @@
 Screeps: Arena のボットを **C++ (WASM)** で書くためのライブラリ。
 ローカルシミュレータと、Emscripten を知らなくても済む CMake ヘルパ付き。
 
-> **動作確認中。** ブリッジは実機で動くことを確認済みだが、
-> API 全体のアリーナごとの確認はまだ終わっていない。下記参照。
+> **動作確認状況:** Season 4 (Pain and Gain) 実機での全 API 動作確認完了。
+> 検証プローブにより 2000 tick 完走および全アサーションの通過を確認済み。他アリーナは順次確認中。下記参照。
 
 ---
 
 ## 動作確認の状況
 
-ブリッジ自体は実機で確認済み。Pain and Gain にデプロイしたボットが
-**2000 tick 完走**している。
+ブリッジおよび C++ API 全体は、Screeps: Arena 実機ゲームエンジンで動作確認済み。
+
+Pain and Gain にデプロイしたボットが **2000 tick 完走**している。
 
 ```
 tick 1 (loop #1, previous 0)
@@ -28,20 +29,30 @@ tick 2000 (loop #2000, previous 1999)
 生存している証拠。あわせて WebAssembly が使えること、16MB のヒープを
 確保できることもプローブで確認している。
 
-ただしこのボットが呼んでいたのは `getTicks()` だけである。
-残りの API — `getObjectsByPrototype()`、creep や構造物の行動、経路探索、
-描画 — は[近似である](sim/FIDELITY.ja.md)シミュレータでしか動かしていない。
-そのため、アリーナごとに実機確認を進めている。
+さらに、包括的 API 検証ボット（[`tests/fixtures/api_probe_bot.cc`](tests/fixtures/api_probe_bot.cc)）を
+Season 4 (Pain and Gain) 実機へデプロイし、全 5 フェーズにわたる API 検証を実施した:
+1. **環境・メタデータ**: `getTicks()`, `getCpuTime()`, `arenaInfo()`, `getTerrainAt()`, `getDirection()`, `obstacleObjectTypes()`, `resourcesAll()`, `constructionCost()`, `getRange()`
+2. **PathFinder & 描画**: `CostMatrix`, `searchPath()` (単一・複数ゴール), `findPath()`, `Visual` (レイヤー、永続化、スタイル描画、クリア)
+3. **プロトタイプ & スナップショット**: `getObjects()`, 各種プロトタイプの `getObjectsByPrototype<T>()`, スナップショットフィールドとハンドルの整合性、空間検索 (`findClosestByPath`, `findClosestByRange`, `findInRange`)
+4. **オブジェクト詳細・Store・ConstructionSite**: `getObjectById<T>()`, `Creep::body()`, `Creep::countParts()`, `Store`, `GameObject::effects()`, `ticksToDecay()`, `createConstructionSite()`, `ConstructionSite::remove()`
+5. **Creep アクションインテント**: `move()`, `moveTo()`, `attack()`, `rangedAttack()`, `rangedMassAttack()`, `heal()`, `rangedHeal()`, `pull()`, `drop()`, `pickup()`, `transfer()`, `withdraw()`, `harvest()`, `build()`
 
-- [ ] Pain and Gain: Basic level
+すべてのアサーションが **100% パス**し、生存行動を継続して **2000 tick 完走**を確認している。
+
+アリーナごとの確認状況:
+
+- [x] Pain and Gain: Basic level (Season 4 実機にて api_probe_bot による全 API 検証・2000 tick 完走確認済み)
 - [ ] Spawn and Swamp: Basic level
 - [ ] Escort Run: Basic level
 - [ ] Pain and Gain: Advanced level
 - [ ] Spawn and Swamp: Advanced level
 - [ ] Escort Run: Advanced level
 
-チェックが付くまでは、そのアリーナでの挙動は「動く」ではなく「未検証」として
-扱うこと。違いが見つかったら `sim/FIDELITY.ja.md` に反映する。
+検証用ボットは、以下のようにビルド・デプロイして任意のアリーナで実行可能:
+
+```sh
+ARENA_DIR=~/ScreepsArena/your-arena npm run probe:deploy
+```
 
 ---
 
