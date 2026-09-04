@@ -18,12 +18,10 @@
 
 #include <arena/arena.h>
 
-#include <iostream>
-#include <iomanip>
-#include <sstream>
+#include <algorithm>
+#include <cstdio>
 #include <string>
 #include <vector>
-#include <algorithm>
 
 namespace arena {
 
@@ -36,19 +34,23 @@ void check(const std::string& name, bool condition, const std::string& details =
     ++g_total_assertions;
     if (condition) {
         ++g_passed_assertions;
-        std::cout << "  [PASS] " << name;
-        if (!details.empty()) std::cout << " (" << details << ")";
-        std::cout << "\n";
+        if (!details.empty()) {
+            std::printf("  [PASS] %s (%s)\n", name.c_str(), details.c_str());
+        } else {
+            std::printf("  [PASS] %s\n", name.c_str());
+        }
     } else {
-        std::cout << "  [FAIL] " << name;
-        if (!details.empty()) std::cout << " (" << details << ")";
-        std::cout << "\n";
+        if (!details.empty()) {
+            std::printf("  [FAIL] %s (%s)\n", name.c_str(), details.c_str());
+        } else {
+            std::printf("  [FAIL] %s\n", name.c_str());
+        }
     }
 }
 
 // Phase 1: Environment, Metadata, Constants, and Pure Geometry
 void testPhase1_EnvironmentAndMetadata() {
-    std::cout << "\n=== [PHASE 1] Environment & Metadata API ===\n";
+    std::printf("\n=== [PHASE 1] Environment & Metadata API ===\n");
 
     int tick = getTicks();
     check("getTicks()", tick >= 1, "tick=" + std::to_string(tick));
@@ -90,7 +92,7 @@ void testPhase1_EnvironmentAndMetadata() {
 
 // Phase 2: PathFinder & Visuals
 void testPhase2_PathFinderAndVisuals() {
-    std::cout << "\n=== [PHASE 2] PathFinder & Visuals API ===\n";
+    std::printf("\n=== [PHASE 2] PathFinder & Visuals API ===\n");
 
     CostMatrix cm;
     check("CostMatrix::get default", cm.get(25, 25) == 0);
@@ -140,7 +142,7 @@ void testPhase2_PathFinderAndVisuals() {
 
 // Phase 3: Prototypes & Snapshot Mechanism
 void testPhase3_PrototypesAndSnapshots() {
-    std::cout << "\n=== [PHASE 3] Prototypes & Snapshot Verification ===\n";
+    std::printf("\n=== [PHASE 3] Prototypes & Snapshot Verification ===\n");
 
     auto all_objects = getObjects();
     check("getObjects()", !all_objects.empty(), "total=" + std::to_string(all_objects.size()));
@@ -196,7 +198,7 @@ void testPhase3_PrototypesAndSnapshots() {
 
 // Phase 4: Object Details, Store, and ConstructionSite
 void testPhase4_ObjectDetailsAndStore() {
-    std::cout << "\n=== [PHASE 4] Object Details, Store & ConstructionSite ===\n";
+    std::printf("\n=== [PHASE 4] Object Details, Store & ConstructionSite ===\n");
 
     auto creeps = getObjectsByPrototype<Creep>();
     if (creeps.empty()) return;
@@ -236,7 +238,7 @@ void testPhase4_ObjectDetailsAndStore() {
 
 // Phase 5: Action Intents Coverage
 void testPhase5_ActionIntents() {
-    std::cout << "\n=== [PHASE 5] Creep Action Intents Coverage ===\n";
+    std::printf("\n=== [PHASE 5] Creep Action Intents Coverage ===\n");
 
     auto creeps = getObjectsByPrototype<Creep>();
     std::vector<Creep> my_creeps;
@@ -353,9 +355,9 @@ void loop() {
 
     switch (tick) {
         case 1:
-            std::cout << "\n======================================================\n";
-            std::cout << "  SCREEPS ARENA C++ API FULL COVERAGE PROBE (TICK 1)  \n";
-            std::cout << "======================================================\n";
+            std::printf("\n======================================================\n");
+            std::printf("  SCREEPS ARENA C++ API FULL COVERAGE PROBE (TICK 1)  \n");
+            std::printf("======================================================\n");
             testPhase1_EnvironmentAndMetadata();
             break;
         case 2:
@@ -369,15 +371,15 @@ void loop() {
             break;
         case 5:
             testPhase5_ActionIntents();
-            std::cout << "\n======================================================\n";
-            std::cout << "  ALL PROBE PHASES COMPLETED                          \n";
-            std::cout << "  ASSERTIONS: " << g_passed_assertions << " / " << g_total_assertions << " PASSED\n";
-            std::cout << "======================================================\n\n";
+            std::printf("\n======================================================\n");
+            std::printf("  ALL PROBE PHASES COMPLETED                          \n");
+            std::printf("  ASSERTIONS: %d / %d PASSED\n", g_passed_assertions, g_total_assertions);
+            std::printf("======================================================\n\n");
             break;
         default:
             runSurvivalTick();
             if (tick % 200 == 0) {
-                std::cout << "Tick " << tick << " surviving normally (CPU=" << getCpuTime() / 1e6 << " ms)\n";
+                std::printf("Tick %d surviving normally (CPU=%.3f ms)\n", tick, getCpuTime() / 1e6);
             }
             break;
     }

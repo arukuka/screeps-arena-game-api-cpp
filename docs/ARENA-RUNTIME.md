@@ -45,20 +45,23 @@ define, so the fallback is skipped entirely and `.bind` throws. Worse, this runs
 instantiation. `tests/harness.test.mjs` covers two cases -- a console with only
 `log()`, and a frozen one -- and both were confirmed to fail without the shim.
 
-### `Date` is undefined
+### `Date` is undefined (prefer `<cstdio>` for standard output)
 
 The isolated-vm sandbox removes `Date` from global scope to enforce determinism.
-However, Emscripten's filesystem and stdio layer (which gets pulled in when C++
-code includes `<iostream>` or uses streams) updates stream timestamps using
-`Date.now()`. Without a shim, writing to stdout/stderr via `std::cout` throws:
+Emscripten's virtual filesystem layer (which gets pulled in when C++ code includes
+`<iostream>` or uses streams) updates stream timestamps using `Date.now()`. Without
+a shim, writing via `std::cout` throws `ReferenceError: Date is not defined`.
 
-```
-ReferenceError: Date is not defined
-```
-
-`ensureDate()` in `js/runtime.mjs` installs a lightweight deterministic stub
-if `globalThis.Date` is absent, allowing `<iostream>` and `std::cout` to work
-transparently in real matches without crashes.
+**Mitigations:**
+1. **Use `<cstdio>` (`std::printf`) (Recommended)**:
+   For logging in C++, `<cstdio>` (`std::printf`) is strongly recommended over `<iostream>` (`std::cout`).
+   Emscripten routes `std::printf` directly to `out()` (`console.log`) without linking the
+   virtual filesystem (FS / TTY) runtime. This saves >150 KB of bundle size and completely
+   bypasses `Date` and `_fd_write` overhead.
+2. **Module-scoped `Date` shim**:
+   Both `js/rollup.mjs` (via bundle banner) and `js/runtime.mjs` (`ensureDate()`) inject a
+   deterministic stub in module scope, allowing bots that use `<iostream>` or POSIX time
+   to run safely on real hardware.
 
 ### Console output during module evaluation never reaches the match log
 

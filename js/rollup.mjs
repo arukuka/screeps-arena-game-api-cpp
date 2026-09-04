@@ -31,7 +31,28 @@ const NOTICE = `/*
  * Licence: https://mozilla.org/MPL/2.0/
  *
  * The bot's own code is not covered by that licence.
- */`;
+ */
+var Date = globalThis.Date ?? class Date {
+  #ms;
+  constructor(ms = 0) { this.#ms = Number(ms); }
+  getTime() { return this.#ms; }
+  valueOf() { return this.#ms; }
+  getFullYear() { return 1970; }
+  getMonth() { return 0; }
+  getDate() { return 1; }
+  getHours() { return 0; }
+  getMinutes() { return 0; }
+  getSeconds() { return 0; }
+  getMilliseconds() { return 0; }
+  toISOString() { return '1970-01-01T00:00:00.000Z'; }
+  toTimeString() { return '00:00:00 GMT+0000'; }
+  toDateString() { return 'Thu Jan 01 1970'; }
+  toString() { return 'Thu Jan 01 1970 00:00:00 GMT+0000'; }
+  static now() { return 0; }
+};
+if (typeof globalThis.Date === 'undefined') {
+  try { globalThis.Date = Date; } catch {}
+}`;
 
 /**
  * @param {object} [options]

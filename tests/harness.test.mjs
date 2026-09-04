@@ -103,7 +103,7 @@ describe('WASM bot against the simulator', () => {
     }
   });
 
-  it('runs bots using std::cout (<iostream>) when Date is undefined', async () => {
+  it('runs api_probe_bot when Date is undefined', async () => {
     const { default: createProbeBot } = await import('../build/fixtures/api_probe_bot.mjs');
     const originalDate = globalThis.Date;
     delete globalThis.Date;
