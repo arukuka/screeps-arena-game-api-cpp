@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
-import { SNAPSHOT_FIELDS } from '../js/host.mjs';
+import { SNAPSHOT_FIELDS, SNAPSHOT_FIELD_COUNT, createHost } from '../js/host.mjs';
 
 const header = readFileSync(new URL('../include/arena/object.h', import.meta.url), 'utf8');
 
@@ -48,6 +48,36 @@ describe('snapshot layout', () => {
   it('agrees on the record width', () => {
     assert.match(header, /inline constexpr int kFieldCount = static_cast<int>\(Field::kCount\);/);
     assert.equal(SNAPSHOT_FIELDS.length, fromHeader.length);
+  });
+
+  it('can write every field it declares', () => {
+    // A field with no column writer throws only when a bot first reads it,
+    // which on the Arena means mid-match. Cheaper to find out here.
+    const host = createHost({
+      utils: { getObjectsByPrototype: () => [] },
+      prototypes: {},
+      constants: {},
+    });
+
+    // One object carrying every property the writers know how to read.
+    const object = {
+      x: 1, y: 2, exists: true, ticksToDecay: 3, hits: 4, hitsMax: 5,
+      my: true, fatigue: 6, spawning: false, energy: 7, energyCapacity: 8,
+      amount: 9, progress: 10, progressTotal: 11, cooldown: 12,
+      store: { energy: 13, getCapacity: () => 14, getUsedCapacity: () => 15 },
+    };
+
+    const unwritable = [];
+    for (const [slot, field] of SNAPSHOT_FIELDS.entries()) {
+      const view = new Int32Array(SNAPSHOT_FIELD_COUNT);
+      try {
+        host.snapshotField([object], field, view, slot, SNAPSHOT_FIELD_COUNT);
+      } catch (error) {
+        unwritable.push(`${field}: ${error.message}`);
+      }
+    }
+
+    assert.deepEqual(unwritable, []);
   });
 
   it('uses INT32_MIN as the absent marker on both sides', () => {
