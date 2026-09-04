@@ -22,6 +22,8 @@
 #include <arena/arena.h>
 #include <emscripten/heap.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <unistd.h>
 #include <vector>
@@ -130,6 +132,21 @@ void report() {
 
   }
 
+  // The three candidates side by side, since this is the open question.
+  const Result* shared = findResult("fill: shared loop");
+  const Result* mono = findResult("fill: per-field loops");
+  const Result* record = findResult("fill: one record loop");
+  if (shared != nullptr && mono != nullptr && record != nullptr) {
+    const double best = std::min({nsPerOp(*shared), nsPerOp(*mono), nsPerOp(*record)});
+    std::printf("\nfilling the snapshot, %d creeps:\n", g_creepCount);
+    std::printf("  shared loop, 5 columns  %10.1f ns  %.2fx\n", nsPerOp(*shared),
+                nsPerOp(*shared) / best);
+    std::printf("  per-field, 5 columns    %10.1f ns  %.2fx\n", nsPerOp(*mono),
+                nsPerOp(*mono) / best);
+    std::printf("  one record loop, 9      %10.1f ns  %.2fx\n", nsPerOp(*record),
+                nsPerOp(*record) / best);
+  }
+
   std::printf("\n(sink %lld -- ignore, it exists to defeat the optimiser)\n", g_sink);
 }
 
@@ -161,6 +178,44 @@ void scanHybrid(const std::vector<Creep>& live) {
     total += creep.my() ? 1 : 0;
   }
   g_sink = total;
+}
+
+/// The five fields the scans read, by the names js/host.mjs knows.
+constexpr const char* kScanFields[] = {"x", "y", "hits", "hitsMax", "my"};
+
+/// Fills those five columns by whichever host function is named, starting from
+/// a cold slice. Lets one deploy compare the candidate implementations instead
+/// of shipping a guess and waiting a round trip to learn it was wrong.
+void fillColumns(const char* hostFunction) {
+  arena::detail::beginTick();
+  const std::vector<Creep> live = creeps();
+  if (live.empty()) return;
+
+  const arena::detail::Slice& slice = arena::detail::objectsByPrototype(Creep::kPrototype);
+  std::vector<std::int32_t> buffer(live.size() * arena::detail::kFieldCount);
+  const emscripten::val view(emscripten::typed_memory_view(buffer.size(), buffer.data()));
+
+  for (int index = 0; index < 5; ++index) {
+    arena::detail::api().call<void>(hostFunction, slice.objects,
+                                    std::string(kScanFields[index]), view, index,
+                                    arena::detail::kFieldCount);
+  }
+  g_sink = buffer[0];
+}
+
+/// The third candidate: every Creep field in one loop and one crossing.
+void fillCreepRecord() {
+  arena::detail::beginTick();
+  const std::vector<Creep> live = creeps();
+  if (live.empty()) return;
+
+  const arena::detail::Slice& slice = arena::detail::objectsByPrototype(Creep::kPrototype);
+  std::vector<std::int32_t> buffer(live.size() * arena::detail::kFieldCount);
+  const emscripten::val view(emscripten::typed_memory_view(buffer.size(), buffer.data()));
+
+  arena::detail::api().call<void>("benchSnapshotCreepFields", slice.objects, view,
+                                  arena::detail::kFieldCount);
+  g_sink = buffer[0];
 }
 
 /// Everything a tick pays before the first read is answered: the query, the
@@ -255,7 +310,29 @@ void loop() {
               [] { g_sink = static_cast<long long>(creeps().size()); });
       break;
 
-    case 9: {
+    // --- how best to fill the snapshot ------------------------------------
+    //
+    // Three candidates, same work, measured together. The first is what the
+    // library ships; the other two are alternatives that reasoning alone got
+    // wrong once already.
+
+    case 9:
+      measure("fill: shared loop", "5 columns", 200,
+              [] { fillColumns("snapshotField"); });
+      break;
+
+    case 10:
+      measure("fill: per-field loops", "5 columns", 200,
+              [] { fillColumns("benchSnapshotFieldMono"); });
+      break;
+
+    case 11:
+      // Reads 9 fields rather than 5, but in one loop and one crossing.
+      measure("fill: one record loop", "9 fields", 200,
+              [] { fillCreepRecord(); });
+      break;
+
+    case 12: {
       // Is 16 MB enough? Report it rather than argue. `sbrk(0)` is how far the
       // allocator has grown into the heap; the gap to the total is headroom.
       const std::size_t total = emscripten_get_heap_size();
@@ -266,7 +343,7 @@ void loop() {
       break;
     }
 
-    case 10:
+    case 13:
       report();
       break;
 

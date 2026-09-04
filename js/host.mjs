@@ -44,20 +44,78 @@ const numeric = (value) => (typeof value === 'number' ? value | 0 : ABSENT);
 const flag = (value) => (typeof value === 'boolean' ? (value ? 1 : 0) : ABSENT);
 
 /**
- * One loop per field, written out rather than driven by a lookup table.
+ * One loop per field. **Not the default** -- see `snapshotField` below.
  *
- * The table version cost twice as much on the real game -- 311 ns a read
- * against 153 ns for the same reads written inline. Sharing one loop across
- * every field makes its inner call site megamorphic, and V8 stops inlining the
- * accessor. A separate loop per field keeps each one monomorphic.
+ * Written on the theory that sharing one loop across every field makes its
+ * inner call site megamorphic and stops V8 inlining the accessor. Measured on
+ * the real game, it was 60% *slower* than the shared loop: 86,136 ns against
+ * 53,746 ns for a cold first pass. The likely reason is the opposite of the
+ * theory -- one shared function called 1,000 times a run tiers up, while
+ * eighteen functions called 200 times each stay in the interpreter.
  *
- * Verbose, and worth it: this is the hot path of the whole read model.
+ * Kept so `bench/` can measure both rather than argue about it.
  *
  * @param {object[]} o  the objects
  * @param {Int32Array} v  the record buffer
  * @param {number} s  this field's slot within a record
  * @param {number} n  fields per record
  */
+/**
+ * How to read each slot. `store` is passed in so it is fetched at most once.
+ *
+ * Driven by the shared loop in `snapshotField`, which is the default: on the
+ * real game it beat one loop per field, apparently because a single function
+ * called often enough gets optimised while many rarely-called ones do not.
+ */
+const READERS = {
+  x: (o) => numeric(o.x),
+  y: (o) => numeric(o.y),
+  exists: (o) => flag(o.exists),
+  ticksToDecay: (o) => numeric(o.ticksToDecay),
+  hits: (o) => numeric(o.hits),
+  hitsMax: (o) => numeric(o.hitsMax),
+  my: (o) => flag(o.my),
+  fatigue: (o) => numeric(o.fatigue),
+  spawning: (o) => flag(o.spawning),
+  energy: (o) => numeric(o.energy),
+  energyCapacity: (o) => numeric(o.energyCapacity),
+  amount: (o) => numeric(o.amount),
+  progress: (o) => numeric(o.progress),
+  progressTotal: (o) => numeric(o.progressTotal),
+  cooldown: (o) => numeric(o.cooldown),
+  storeEnergy: (_o, store) => (store ? numeric(store.energy) : ABSENT),
+  storeCapacity: (_o, store) => (store ? numeric(store.getCapacity('energy')) : ABSENT),
+  storeUsed: (_o, store) => (store ? numeric(store.getUsedCapacity('energy')) : ABSENT),
+};
+
+/**
+ * Every field a Creep has, written by one loop.
+ *
+ * A third candidate for filling the snapshot, kept alongside the other two so
+ * `bench/` can settle which is fastest on the real game rather than reasoning
+ * about V8. This one reads more fields than a bot may want, but does it in a
+ * single hot function and a single crossing.
+ */
+function writeCreepFields(objects, view, stride, slots) {
+  for (let i = 0; i < objects.length; i += 1) {
+    const o = objects[i];
+    const at = i * stride;
+    const store = o.store;
+    view[at + slots.x] = numeric(o.x);
+    view[at + slots.y] = numeric(o.y);
+    view[at + slots.exists] = flag(o.exists);
+    view[at + slots.hits] = numeric(o.hits);
+    view[at + slots.hitsMax] = numeric(o.hitsMax);
+    view[at + slots.my] = flag(o.my);
+    view[at + slots.fatigue] = numeric(o.fatigue);
+    view[at + slots.spawning] = flag(o.spawning);
+    view[at + slots.storeEnergy] = store ? numeric(store.energy) : ABSENT;
+  }
+}
+
+/** Slot index by field name. */
+const SLOT = Object.fromEntries(SNAPSHOT_FIELDS.map((name, index) => [name, index]));
+
 const COLUMN_WRITERS = {
   x: (o, v, s, n) => { for (let i = 0; i < o.length; i += 1) v[i * n + s] = numeric(o[i].x); },
   y: (o, v, s, n) => { for (let i = 0; i < o.length; i += 1) v[i * n + s] = numeric(o[i].y); },
@@ -216,11 +274,32 @@ export function createHost({
      * @param {number} stride     fields per record
      */
     snapshotField: (objects, field, view, slot, stride) => {
-      const write = COLUMN_WRITERS[field];
-      if (write === undefined) {
+      const read = READERS[field];
+      if (read === undefined) {
         throw new Error(`unknown snapshot field "${field}"; see SNAPSHOT_FIELDS`);
       }
-      write(objects, view, slot, stride);
+
+      const wantsStore = field.startsWith('store');
+      for (let index = 0; index < objects.length; index += 1) {
+        const object = objects[index];
+        view[index * stride + slot] = read(object, wantsStore ? object.store : undefined);
+      }
+    },
+
+    // --- benchmark-only alternatives ---------------------------------------
+    //
+    // Two other ways to fill the snapshot, exposed so bench/ can measure all
+    // three in one deploy instead of shipping a guess and waiting a round trip
+    // to find out it was wrong. Not used by the library.
+
+    /** One monomorphic loop per field. */
+    benchSnapshotFieldMono: (objects, field, view, slot, stride) => {
+      COLUMN_WRITERS[field](objects, view, slot, stride);
+    },
+
+    /** Every Creep field in one loop and one crossing. */
+    benchSnapshotCreepFields: (objects, view, stride) => {
+      writeCreepFields(objects, view, stride, SLOT);
     },
 
     // --- the constants that <arena/constants.h> refuses to guess at, exposed
