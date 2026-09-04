@@ -70,6 +70,42 @@ describe('snapshot-backed reads', () => {
     assert.equal(logs.filter((line) => line === 'mismatches 0').length, 5);
   });
 
+  it('drives the visual layer through to the simulator', () => {
+    // <arena/visual.h> had no execution path at all until this: it compiled,
+    // and that was the whole of what was known about it.
+    const world = populated();
+    run(world);
+
+    assert.deepEqual(
+      world.visuals.map((entry) => entry.op),
+      ['circle', 'line', 'rect', 'text', 'poly'],
+    );
+
+    const [circle, line, rect, text, poly] = world.visuals;
+    assert.equal(circle.layer, 2);
+    assert.deepEqual(circle.pos, { x: 3, y: 4 });
+    assert.deepEqual(circle.style, { radius: 0.5, fill: '#ff0000' });
+
+    assert.deepEqual(line.from, { x: 0, y: 0 });
+    assert.deepEqual(line.to, { x: 5, y: 5 });
+    assert.equal(line.style.width, 2);
+
+    assert.deepEqual({ w: rect.w, h: rect.h }, { w: 4, h: 6 });
+    assert.equal(text.text, 'hello');
+    assert.equal(text.style.align, 'center');
+    assert.equal(poly.points.length, 3);
+  });
+
+  it('omits visual style fields that were never set', () => {
+    // Every style field is optional; an unset one must not reach JS as null,
+    // or the game would see it as a deliberate choice rather than a default.
+    const world = populated();
+    run(world);
+
+    const [circle] = world.visuals;
+    assert.deepEqual(Object.keys(circle.style).sort(), ['fill', 'radius']);
+  });
+
   it('reports an empty world without inventing objects', () => {
     const logs = run(new World({ width: 10, height: 10 }));
 

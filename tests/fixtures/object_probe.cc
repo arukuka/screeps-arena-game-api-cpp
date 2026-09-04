@@ -100,6 +100,18 @@ void loop() {
     }
   }
 
+  // The visual layer has no readable state to compare, so the check is that
+  // the calls arrive at all, with the arguments given. The simulator records
+  // them; tests/objects.test.mjs asserts on the recording.
+  const Visual visual(2, false);
+  visual.circle({3, 4}, CircleStyle{.radius = 0.5, .fill = "#ff0000"})
+      .line({0, 0}, {5, 5}, LineStyle{.width = 2.0, .color = "#00ff00"})
+      .rect({1, 1}, 4, 6, RectStyle{.fill = "#0000ff"})
+      .text("hello", {7, 8}, TextStyle{.align = "center"})
+      .poly({{0, 0}, {1, 1}, {2, 0}}, PolyStyle{.stroke = "#ffffff"});
+  std::printf("visual layer=%d persistent=%d\n", visual.layer(),
+              visual.persistent() ? 1 : 0);
+
   std::printf("mismatches %d\n", g_failures);
 }
 
