@@ -15,10 +15,9 @@ npm run bench -- --creeps 5
 
 ## Measured on the real game
 
-> **These are pre-hybrid numbers.** They measure the handle-based reads the
-> library used at the time, which is what motivated the change. The hybrid
-> backend that replaced it has not been re-measured on the real game yet; run
-> `npm run bench:deploy` for current figures.
+> These measure the handle-based path the library used before the hybrid, and
+> are kept because they are what motivated the change. Current figures are
+> under "The final numbers" below.
 
 
 Pain and Gain, 28 creeps. A "pass" is 28 creeps x 5 fields, so 140 reads.
@@ -91,6 +90,44 @@ Raising `INITIAL_MEMORY` is the way to get more. **Do not turn on
 JS-side view over it -- including the one `snapshotCreeps` writes through --
 becomes detached, with writes silently going nowhere.
 `cmake/ArenaBot.cmake` records the full reasoning next to the flag.
+
+## The final numbers
+
+Pain and Gain, 28 creeps, three runs of the shipped implementation:
+
+```
+scan: raw handles          53,046 / 53,084 / 63,956 ns   (1 pass, pre-hybrid path)
+scan: hybrid accessors        923 /    936 /    926 ns   (1 pass, from memory)
+first pass (cold)          47,430 / 52,475 / 65,462 ns   (query + wrap + 5 columns)
+break-even                   0.91 /   1.01 /   1.04 passes
+```
+
+A pass costs ~60x less once the columns are loaded, and the first pass costs
+about what the handle path did. So the hybrid never loses, and wins as soon as
+anything reads the world twice.
+
+### The attempts that did not work
+
+Each was tried on the real game, and each was worse. They are recorded because
+the reasoning behind them was plausible, and plausible is not evidence.
+
+| Attempt | Result |
+|---|---|
+| Fixed 18-field record, filled eagerly | 104 us a tick. **Worse than no snapshot** -- most fields were never asked for |
+| Per-prototype field sets, still eager | Better, but still pays for fields the bot does not read |
+| One specialised loop per field | **1.43x worse** than one shared loop |
+| One loop reading a whole 9-field record | **2.9x worse**, and the least stable |
+
+The last two were written on the theory that a monomorphic call site, or a
+single hot function, would let V8 optimise better. Neither survived
+measurement. What actually predicts the cost is the number of properties read
+off Arena game objects -- 11 reads beat 5 reads never, whatever shape the loop
+has.
+
+Hence lazy columns: read each field at most once a tick, and read no field
+nobody asked for.
+
+---
 
 ## What to conclude
 

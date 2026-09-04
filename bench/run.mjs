@@ -56,6 +56,6 @@ for (let i = 0; i < 10; i += 1) {
 const match = createMatch({ createArenaBot, world, onLog: (text) => console.log(text) });
 
 // bench.cc runs one benchmark per tick and reports on the last one.
-match.run(13);
+match.run(10);
 
 console.log(`\nboundary crossings this run: ${JSON.stringify(world.apiCalls)}`);

@@ -181,33 +181,51 @@ The C++ side has the same shape: one set of declarations in
 
 ### Reads come from a snapshot, actions go to the handle
 
-`getObjectsByPrototype()` copies every numeric field of every matching object
-into WASM memory in **one crossing**, and the objects it returns read from
-there. Actions still cross immediately, so they still return the game's result
-code.
+A game object holds a JS handle *and* an index into a per-tick snapshot.
+Reading a property is served from WASM memory; acting still crosses into
+JavaScript immediately, so actions still return the game's result code.
 
-A property in the JS API is a *method* here (`creep.hits()`) because it was once
-a boundary crossing, and because it still is for anything the snapshot cannot
-carry -- strings, arrays, nested objects, and objects obtained through
-`getObjectById()` or `getObjects()`.
+The signatures are identical either way, so your bot never learns which is
+which:
 
 ```cpp
-for (const Creep& creep : getObjectsByPrototype<Creep>()) {
-  if (!creep.my()) continue;                        // crosses the boundary
-  if (creep.harvest(source) == ERR_NOT_IN_RANGE) {  // crosses the boundary
-    creep.moveTo(source.pos());
-  }
+if (!creep.my()) continue;                        // snapshot, ~1 ns
+if (creep.harvest(src) == ERR_NOT_IN_RANGE) {     // crossing, result code intact
+  creep.moveTo(src.pos());
 }
 ```
 
-Measured locally, that takes a scan of 50 creeps from ~57 000 ns down to
-~420 ns: about **135x**. The snapshot itself costs ~19 000 ns a tick, so it pays
-for itself after roughly a third of one pass over the world.
+**Columns load lazily.** Asking any creep for `hits` fills `hits` for every
+creep in that slice, in one crossing; every read after that is a memory access.
+Nothing is fetched until something asks for it.
 
-None of that changes what you write. `bot.cc` is the same either way; only where
-the number comes from changed. [bench/README.md](bench/README.md) has the
-numbers, and [docs/DESIGN.md](docs/DESIGN.md) explains why actions were left
-alone.
+The reason is one measurement: reading a property off an Arena game object costs
+roughly the same whether you do it from C++ (~400 ns, crossing included) or from
+JavaScript (~230 ns). The boundary is not the expensive part -- **the count of
+property reads is**. So the design goal is to read each field at most once per
+tick, and to read no field nobody asked for.
+
+That also rules out the alternatives, all of which were tried and measured:
+filling a fixed record eagerly was worse than not snapshotting at all, and
+specialising the loop per field was 1.4x worse than sharing one.
+[bench/README.md](bench/README.md) has the numbers and the failed attempts.
+
+### Actions are not batched, deliberately
+
+Batching them would remove the last crossing per creep, and cost the result
+code. `if (creep.harvest(s) == ERR_NOT_IN_RANGE)` is the shape every Screeps bot
+is written in, and an action that answers next tick cannot support it.
+
+The measurements said that trade was unnecessary: reads happen
+objects x fields x passes times, actions once or twice per creep. Making reads
+cheap is nearly all of the benefit and costs nothing in expressiveness.
+
+### The cost, honestly
+
+A first pass over the world costs about what the old handle-based path did --
+break-even sits near one pass. Every pass after the first is ~60x cheaper. So
+the hybrid is neutral for a bot that looks at each object once, and a large win
+for anything that scores targets, compares plans, or searches.
 
 ### What native tests can and cannot see
 
