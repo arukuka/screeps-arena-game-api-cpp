@@ -131,7 +131,7 @@ class Creep : public GameObject {
     return value != detail::kAbsent ? value != 0 : handle_["spawning"].as<bool>();
   }
 
-  Store store() const { return Store(handle_, record_); }
+  Store store() const { return Store(handle_, slice_, index_); }
 
   /// Number of live parts of a type -- the quantity most decisions turn on.
   int countParts(std::string_view type) const;
@@ -226,7 +226,7 @@ class StructureSpawn : public OwnedStructure {
   static constexpr const char* kPrototype = "StructureSpawn";
   using OwnedStructure::OwnedStructure;
 
-  Store store() const { return Store(handle_, record_); }
+  Store store() const { return Store(handle_, slice_, index_); }
 
   /// Present only while a creep is being spawned.
   std::optional<Spawning> spawning() const {
@@ -247,7 +247,7 @@ class StructureTower : public OwnedStructure {
   static constexpr const char* kPrototype = "StructureTower";
   using OwnedStructure::OwnedStructure;
 
-  Store store() const { return Store(handle_, record_); }
+  Store store() const { return Store(handle_, slice_, index_); }
   int cooldown() const { return scalar(detail::Field::kCooldown, "cooldown"); }
 
   int attack(const GameObject& target) const {
@@ -264,7 +264,7 @@ class StructureContainer : public OwnedStructure {
   static constexpr const char* kPrototype = "StructureContainer";
   using OwnedStructure::OwnedStructure;
 
-  Store store() const { return Store(handle_, record_); }
+  Store store() const { return Store(handle_, slice_, index_); }
 };
 
 /// Holds energy that spawns may draw on.
@@ -273,7 +273,7 @@ class StructureExtension : public OwnedStructure {
   static constexpr const char* kPrototype = "StructureExtension";
   using OwnedStructure::OwnedStructure;
 
-  Store store() const { return Store(handle_, record_); }
+  Store store() const { return Store(handle_, slice_, index_); }
 };
 
 /// Blocks every creep.

@@ -13,6 +13,7 @@
 #include <emscripten/val.h>
 
 #include <cstdint>
+#include <iterator>
 #include <map>
 #include <string>
 #include <utility>
@@ -62,56 +63,102 @@ std::optional<int> optionalInt(const emscripten::val& value) {
 namespace {
 
 /// Records the buffer holds. Arenas have far fewer objects than this; a
-/// prototype that would overflow it falls back to handle reads rather than
-/// truncating, so the worst case is slow, never wrong.
+/// prototype that would overflow it reads through handles instead, so the
+/// worst case is slow, never wrong.
 constexpr int kMaxRecords = 2048;
 
+struct SliceStore {
+  emscripten::val objects = emscripten::val::undefined();
+  int base = 0;
+  int count = 0;
+  /// One bit per Field: set once that column has been filled this tick.
+  std::uint32_t loaded = 0;
+};
+
 std::vector<std::int32_t> g_records;
+std::vector<SliceStore> g_slices;
+std::map<std::string, int> g_sliceByPrototype;
 int g_nextRecord = 0;
-std::map<std::string, Slice> g_slices;
+
+/// Field names as `js/host.mjs` knows them. Index must match `Field`.
+constexpr const char* kFieldNames[] = {
+    "x", "y", "exists", "ticksToDecay", "hits", "hitsMax",
+    "my", "fatigue", "spawning", "energy", "energyCapacity", "amount",
+    "progress", "progressTotal", "cooldown", "storeEnergy", "storeCapacity",
+    "storeUsed",
+};
+static_assert(std::size(kFieldNames) == static_cast<std::size_t>(kFieldCount),
+              "kFieldNames must match arena::detail::Field, in order");
+
+/// Fills one column for every object in the slice, in a single crossing.
+void loadColumn(SliceStore& slice, Field which) {
+  const std::size_t offset = static_cast<std::size_t>(slice.base) * kFieldCount;
+  const std::size_t span = static_cast<std::size_t>(slice.count) * kFieldCount;
+
+  const emscripten::val view(
+      emscripten::typed_memory_view(span, g_records.data() + offset));
+  api().call<void>("snapshotField", slice.objects,
+                   std::string(kFieldNames[static_cast<int>(which)]), view,
+                   static_cast<int>(which), kFieldCount);
+}
 
 }  // namespace
 
 void beginTick() {
   g_nextRecord = 0;
   g_slices.clear();
+  g_sliceByPrototype.clear();
 }
 
-std::int32_t snapshotValue(int record, Field field) {
-  return g_records[static_cast<std::size_t>(record) * kFieldCount +
-                   static_cast<std::size_t>(field)];
+std::int32_t field(int slice, int index, Field which) {
+  SliceStore& store = g_slices[static_cast<std::size_t>(slice)];
+
+  const std::uint32_t bit = 1u << static_cast<int>(which);
+  if ((store.loaded & bit) == 0) {
+    loadColumn(store, which);
+    store.loaded |= bit;
+  }
+
+  return g_records[(static_cast<std::size_t>(store.base) + index) * kFieldCount +
+                   static_cast<std::size_t>(which)];
 }
 
-const Slice& snapshotByPrototype(const std::string& prototype) {
-  const auto cached = g_slices.find(prototype);
-  if (cached != g_slices.end()) return cached->second;
+const Slice& objectsByPrototype(const std::string& prototype) {
+  static Slice result;
+
+  const auto cached = g_sliceByPrototype.find(prototype);
+  if (cached != g_sliceByPrototype.end()) {
+    const SliceStore& store = g_slices[static_cast<std::size_t>(cached->second)];
+    result = Slice{store.objects, store.count, cached->second};
+    return result;
+  }
 
   if (g_records.empty()) {
     g_records.assign(static_cast<std::size_t>(kMaxRecords) * kFieldCount, kAbsent);
   }
 
-  const int base = g_nextRecord;
-  const std::size_t offset = static_cast<std::size_t>(base) * kFieldCount;
-
-  // JavaScript fills the buffer and hands back the objects, so one crossing
-  // buys both the data and the handles that actions need.
-  const emscripten::val view(
-      emscripten::typed_memory_view(g_records.size() - offset, g_records.data() + offset));
   emscripten::val objects =
-      api().call<emscripten::val>("snapshotByPrototype", prototype, view);
+      api().call<emscripten::val>("objectsByPrototype", prototype);
+  const int count = objects["length"].as<int>();
 
-  Slice slice;
-  slice.count = objects["length"].as<int>();
-  slice.objects = std::move(objects);
-
-  // The host writes nothing it cannot fit. If it did not fit, every object in
-  // this slice reads through its handle instead.
-  if (base + slice.count <= kMaxRecords) {
-    slice.base = base;
-    g_nextRecord = base + slice.count;
+  // No room left: hand back objects that read through their handles.
+  if (g_nextRecord + count > kMaxRecords) {
+    result = Slice{std::move(objects), count, -1};
+    return result;
   }
 
-  return g_slices.emplace(prototype, std::move(slice)).first->second;
+  SliceStore store;
+  store.objects = objects;
+  store.base = g_nextRecord;
+  store.count = count;
+  g_nextRecord += count;
+
+  const int id = static_cast<int>(g_slices.size());
+  g_slices.push_back(std::move(store));
+  g_sliceByPrototype.emplace(prototype, id);
+
+  result = Slice{std::move(objects), count, id};
+  return result;
 }
 
 }  // namespace detail

@@ -60,22 +60,24 @@ std::optional<T> getObjectById(const std::string& id) {
 
 /// Every object of one prototype, e.g. `getObjectsByPrototype<Creep>()`.
 ///
-/// This is where the per-tick snapshot is taken: one crossing copies every
-/// numeric field of every object of this prototype into WASM memory, and the
-/// returned objects read from there. Calling it again in the same tick is
-/// nearly free -- the slice is cached.
+/// The returned objects read their numeric fields from a snapshot rather than
+/// from JavaScript. Columns load on first use: the first `hits()` anywhere
+/// fills `hits` for every object here, in one crossing, and every read after
+/// that is a memory access. A bot pays for the fields it reads and no others.
+///
+/// Calling this again in the same tick is nearly free -- the slice is cached,
+/// columns included.
 ///
 /// Objects obtained any other way (`getObjectById()`, `getObjects()`) read
 /// through their handles instead, which is correct but far slower per field.
 template <typename T>
 std::vector<T> getObjectsByPrototype() {
-  const detail::Slice& slice = detail::snapshotByPrototype(T::kPrototype);
+  const detail::Slice& slice = detail::objectsByPrototype(T::kPrototype);
 
   std::vector<T> objects;
   objects.reserve(static_cast<std::size_t>(slice.count));
   for (int index = 0; index < slice.count; ++index) {
-    objects.emplace_back(slice.objects[index],
-                         slice.base >= 0 ? slice.base + index : -1);
+    objects.emplace_back(slice.objects[index], slice.id, index);
   }
   return objects;
 }

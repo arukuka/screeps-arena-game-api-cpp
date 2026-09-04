@@ -15,6 +15,12 @@ npm run bench -- --creeps 5
 
 ## Measured on the real game
 
+> **These are pre-hybrid numbers.** They measure the handle-based reads the
+> library used at the time, which is what motivated the change. The hybrid
+> backend that replaced it has not been re-measured on the real game yet; run
+> `npm run bench:deploy` for current figures.
+
+
 Pain and Gain, 28 creeps. A "pass" is 28 creeps x 5 fields, so 140 reads.
 
 ```

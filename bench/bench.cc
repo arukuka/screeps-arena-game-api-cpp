@@ -95,7 +95,7 @@ void report() {
   // The comparison the whole exercise exists for.
   const Result* viaHandles = findResult("scan: raw handles");
   const Result* viaSnapshot = findResult("scan: hybrid accessors");
-  const Result* takeSnapshot = findResult("snapshot + wrap");
+  const Result* takeSnapshot = findResult("first pass (cold)");
 
   if (viaHandles != nullptr && viaSnapshot != nullptr && takeSnapshot != nullptr) {
     const double handleRead = nsPerOp(*viaHandles);
@@ -108,7 +108,7 @@ void report() {
     if (snapshotRead > 0) {
       std::printf("  handles are %.0fx slower\n", handleRead / snapshotRead);
     }
-    std::printf("  snapshot + wrap       %10.1f ns  (paid once per tick)\n",
+    std::printf("  first pass, cold      %10.1f ns  (query + wrap + columns)\n",
                 nsPerOp(*takeSnapshot));
 
     const double budget = arena::arenaInfo().cpuTimeLimit;
@@ -119,8 +119,8 @@ void report() {
                   budget / handleRead, budget / snapshotRead);
     }
 
-    // A snapshot only pays for itself if the bot reads the world more than
-    // once. Below this many passes, handles win.
+    // How many passes before the hybrid has repaid its cold start. Below 1.0
+    // it is already cheaper on the very first pass.
     const double saved = handleRead - snapshotRead;
     if (saved > 0) {
       std::printf("  break-even at %.2f passes over the world\n",
@@ -163,11 +163,16 @@ void scanHybrid(const std::vector<Creep>& live) {
   g_sink = total;
 }
 
-/// A fresh snapshot plus wrapping, which is what a tick actually pays once.
-/// `beginTick()` drops the cache so each iteration measures the real thing.
-std::size_t freshSnapshot() {
+/// Everything a tick pays before the first read is answered: the query, the
+/// wrapping, and loading the columns those reads touch.
+///
+/// Columns load on first use, so timing the query alone would measure nothing.
+/// `beginTick()` drops the cache so each iteration starts cold.
+std::size_t coldFirstPass() {
   arena::detail::beginTick();
-  return creeps().size();
+  const std::vector<Creep> live = creeps();
+  scanHybrid(live);
+  return live.size();
 }
 
 
@@ -240,8 +245,8 @@ void loop() {
     case 7:
       // What reads cost a tick, once: one crossing to fill the snapshot, plus
       // wrapping the objects.
-      measure("snapshot + wrap", "1 call", 200,
-              [] { g_sink = static_cast<long long>(freshSnapshot()); });
+      measure("first pass (cold)", "1 pass", 200,
+              [] { g_sink = static_cast<long long>(coldFirstPass()); });
       break;
 
     case 8:

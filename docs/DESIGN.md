@@ -57,11 +57,27 @@ The measurements said that was an unnecessary trade. Reads happen
 objects x fields x passes times; actions happen once or twice per creep. Making
 reads cheap is nearly all of the benefit, and it costs nothing in expressiveness.
 
+### Columns, loaded on demand
+
+The snapshot is filled a **column at a time, on first use**. Asking any creep
+for `hits` fills `hits` for every creep in the slice, in one crossing; every
+read after that is a memory access.
+
+This was not the first design, and the first design was wrong. Filling a fixed
+18-field record eagerly measured 104 us a tick for 28 creeps on the real game --
+nearly twice what a pass of raw handle reads costs, so a bot that read the world
+once came out slower than before. Reading a property off an Arena game object
+costs ~150 ns even from JavaScript, so the price is close to linear in fields
+read, and most of those fields were never asked for.
+
+Loading per column means a bot pays for the fields it reads, once, however many
+times it reads them.
+
 ### What is and is not snapshotted
 
-`arena::detail::Field` lists the numeric fields, filled by `snapshotByPrototype`
-in `js/host.mjs`. Strings, arrays and nested objects stay on the handle: a
-fixed-width int32 record cannot carry them.
+`arena::detail::Field` lists the numeric fields; `snapshotField` in
+`js/host.mjs` knows how to read each one. Strings, arrays and nested objects
+stay on the handle: a fixed-width int32 record cannot carry them.
 
 Objects from `getObjectById()` and `getObjects()` carry no record and read
 through their handles. That is correct but slow per field; prefer

@@ -83,23 +83,34 @@ inline constexpr std::int32_t kAbsent = INT32_MIN;
 /// bot runs, so a bot cannot accidentally read last tick's world.
 void beginTick();
 
-/// Raw slot value. `record` must be a valid index.
-std::int32_t snapshotValue(int record, Field field);
-
-/// One prototype's objects, snapshotted and ready to wrap.
+/// One prototype's objects for this tick.
 struct Slice {
   /// The JS array. Kept whole rather than wrapped per element, so actions can
   /// still reach a handle without paying to materialise one per object.
   emscripten::val objects = emscripten::val::undefined();
-  /// Index of the first record, or -1 when the snapshot could not be taken and
-  /// the objects must fall back to reading through their handles.
-  int base = -1;
   int count = 0;
+  /// Id for `field()`, or -1 when there is no room to snapshot this slice and
+  /// its objects must read through their handles.
+  int id = -1;
 };
 
-/// Snapshots one prototype, or returns the cached slice if already done this
-/// tick. One crossing regardless of how many fields each object has.
-const Slice& snapshotByPrototype(const std::string& prototype);
+/// The objects of one prototype, and a slice id to read them through. Cached
+/// for the tick, so asking twice costs nothing the second time.
+const Slice& objectsByPrototype(const std::string& prototype);
+
+/// One object's value for one field.
+///
+/// Fields load a **column at a time, on first use**: asking any object for
+/// `hits` fills `hits` for every object in the slice, in one crossing, and
+/// every read after that is a memory access.
+///
+/// This is why the snapshot is not a fixed record. Reading a property off an
+/// Arena game object costs ~150 ns even from JavaScript, so eagerly filling
+/// fields the bot never asks for is money spent for nothing -- measured at 104
+/// us a tick for 28 creeps when all 18 slots were filled, which was worse than
+/// not snapshotting at all. Loading on demand means a bot pays for exactly the
+/// fields it reads, and pays once however many times it reads them.
+std::int32_t field(int slice, int index, Field which);
 
 /// `{x, y}` as a JS object, for the API calls that take a bare position.
 emscripten::val toVal(Position position);
@@ -140,18 +151,19 @@ emscripten::val toValArray(const std::vector<T>& items) {
 /// A `Store` on a creep or structure.
 class Store {
  public:
-  /// @param owner   the object the store belongs to
-  /// @param record  its snapshot record, or -1 to read through the handle
-  Store(emscripten::val owner, int record)
-      : owner_(std::move(owner)), record_(record) {}
+  /// @param owner  the object the store belongs to
+  /// @param slice  its snapshot slice, or -1 to read through the handle
+  /// @param index  its position within that slice
+  Store(emscripten::val owner, int slice, int index)
+      : owner_(std::move(owner)), slice_(slice), index_(index) {}
 
   /// Amount of `resource` held. 0 when the store has none.
   ///
   /// Energy comes from the snapshot; other resources still cross the boundary,
   /// because a fixed-width record cannot carry an open-ended set of them.
   int operator[](std::string_view resource) const {
-    if (record_ >= 0 && resource == RESOURCE_ENERGY) {
-      const std::int32_t value = detail::snapshotValue(record_, detail::Field::kStoreEnergy);
+    if (slice_ >= 0 && resource == RESOURCE_ENERGY) {
+      const std::int32_t value = detail::field(slice_, index_, detail::Field::kStoreEnergy);
       if (value != detail::kAbsent) return value;
     }
     const emscripten::val amount = handle()[std::string(resource)];
@@ -180,17 +192,18 @@ class Store {
   emscripten::val handle() const { return owner_["store"]; }
 
  private:
-  std::optional<int> snapshotOr(detail::Field field, const char* method,
+  std::optional<int> snapshotOr(detail::Field which, const char* method,
                                 std::string_view resource) const {
-    if (record_ >= 0 && resource == RESOURCE_ENERGY) {
-      const std::int32_t value = detail::snapshotValue(record_, field);
+    if (slice_ >= 0 && resource == RESOURCE_ENERGY) {
+      const std::int32_t value = detail::field(slice_, index_, which);
       if (value != detail::kAbsent) return value;
     }
     return detail::optionalInt(handle().call<emscripten::val>(method, std::string(resource)));
   }
 
   emscripten::val owner_;
-  int record_ = -1;
+  int slice_ = -1;
+  int index_ = 0;
 };
 
 /// Base prototype for game objects. Everything in the arena derives from this.
@@ -201,16 +214,17 @@ class GameObject {
   static constexpr const char* kPrototype = "GameObject";
 
   /// @param handle  the JS game object
-  /// @param record  its snapshot record, or -1 to read through the handle
-  explicit GameObject(emscripten::val handle, int record = -1)
-      : handle_(std::move(handle)), record_(record) {}
+  /// @param slice   the snapshot slice, or -1 to read through the handle
+  /// @param index   this object's position within that slice
+  explicit GameObject(emscripten::val handle, int slice = -1, int index = 0)
+      : handle_(std::move(handle)), slice_(slice), index_(index) {}
 
   const emscripten::val& handle() const { return handle_; }
 
-  /// Index into this tick's snapshot, or -1 if this object was not snapshotted
+  /// Snapshot slice, or -1 if this object was not snapshotted
   /// (`getObjectById()` and `getObjects()` return such objects). Reads then
-  /// fall back to the handle, which is correct but ~2000x slower per field.
-  int record() const { return record_; }
+  /// fall back to the handle, which is correct but far slower per field.
+  int record() const { return slice_; }
 
   /// True while the object is still in the game.
   bool exists() const {
@@ -240,9 +254,9 @@ class GameObject {
   int getRangeTo(Position target) const { return getRange(pos(), target); }
 
  protected:
-  /// The snapshot slot, or `kAbsent` when this object was not snapshotted.
-  std::int32_t snapshot(detail::Field field) const {
-    return record_ >= 0 ? detail::snapshotValue(record_, field) : detail::kAbsent;
+  /// The snapshot value, or `kAbsent` when this object was not snapshotted.
+  std::int32_t snapshot(detail::Field which) const {
+    return slice_ >= 0 ? detail::field(slice_, index_, which) : detail::kAbsent;
   }
 
   /// A field the object always has: snapshot if available, handle otherwise.
@@ -252,18 +266,18 @@ class GameObject {
   }
 
   /// A field the object may not have at all.
-  std::optional<int> optionalScalar(detail::Field field, const char* property) const {
-    if (record_ >= 0) {
-      const std::int32_t value = detail::snapshotValue(record_, field);
+  std::optional<int> optionalScalar(detail::Field which, const char* property) const {
+    if (slice_ >= 0) {
+      const std::int32_t value = detail::field(slice_, index_, which);
       return value == detail::kAbsent ? std::nullopt : std::optional<int>(value);
     }
     return detail::optionalInt(handle_[property]);
   }
 
   /// A tri-state flag: true, false, or "the game did not say".
-  std::optional<bool> optionalFlag(detail::Field field, const char* property) const {
-    if (record_ >= 0) {
-      const std::int32_t value = detail::snapshotValue(record_, field);
+  std::optional<bool> optionalFlag(detail::Field which, const char* property) const {
+    if (slice_ >= 0) {
+      const std::int32_t value = detail::field(slice_, index_, which);
       return value == detail::kAbsent ? std::nullopt : std::optional<bool>(value != 0);
     }
     const emscripten::val raw = handle_[property];
@@ -272,7 +286,8 @@ class GameObject {
   }
 
   emscripten::val handle_;
-  int record_ = -1;
+  int slice_ = -1;
+  int index_ = 0;
 };
 
 }  // namespace arena

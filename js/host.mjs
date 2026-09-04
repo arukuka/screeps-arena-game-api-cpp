@@ -33,6 +33,9 @@ export const SNAPSHOT_FIELD_COUNT = SNAPSHOT_FIELDS.length;
 /** Written where the object has no such property. INT32_MIN, matching C++. */
 const ABSENT = -2147483648;
 
+/** Slot index by field name, derived so the two never disagree. */
+const SLOT = Object.fromEntries(SNAPSHOT_FIELDS.map((name, index) => [name, index]));
+
 /** Numbers pass through; anything else, including null, reads as absent. */
 const numeric = (value) => (typeof value === 'number' ? value | 0 : ABSENT);
 
@@ -43,36 +46,27 @@ const numeric = (value) => (typeof value === 'number' ? value | 0 : ABSENT);
  */
 const flag = (value) => (typeof value === 'boolean' ? (value ? 1 : 0) : ABSENT);
 
-function writeRecord(object, view, at) {
-  view[at] = numeric(object.x);
-  view[at + 1] = numeric(object.y);
-  view[at + 2] = flag(object.exists);
-  view[at + 3] = numeric(object.ticksToDecay);
-  view[at + 4] = numeric(object.hits);
-  view[at + 5] = numeric(object.hitsMax);
-  view[at + 6] = flag(object.my);
-  view[at + 7] = numeric(object.fatigue);
-  view[at + 8] = flag(object.spawning);
-  view[at + 9] = numeric(object.energy);
-  view[at + 10] = numeric(object.energyCapacity);
-  view[at + 11] = numeric(object.amount);
-  view[at + 12] = numeric(object.progress);
-  view[at + 13] = numeric(object.progressTotal);
-  view[at + 14] = numeric(object.cooldown);
-
-  // One property access decides whether the three store slots are worth
-  // fetching at all; most objects have no store.
-  const store = object.store;
-  if (store === undefined || store === null) {
-    view[at + 15] = ABSENT;
-    view[at + 16] = ABSENT;
-    view[at + 17] = ABSENT;
-    return;
-  }
-  view[at + 15] = numeric(store.energy);
-  view[at + 16] = numeric(store.getCapacity('energy'));
-  view[at + 17] = numeric(store.getUsedCapacity('energy'));
-}
+/** How to read each slot. `store` is passed in so it is fetched at most once. */
+const READERS = {
+  x: (o) => numeric(o.x),
+  y: (o) => numeric(o.y),
+  exists: (o) => flag(o.exists),
+  ticksToDecay: (o) => numeric(o.ticksToDecay),
+  hits: (o) => numeric(o.hits),
+  hitsMax: (o) => numeric(o.hitsMax),
+  my: (o) => flag(o.my),
+  fatigue: (o) => numeric(o.fatigue),
+  spawning: (o) => flag(o.spawning),
+  energy: (o) => numeric(o.energy),
+  energyCapacity: (o) => numeric(o.energyCapacity),
+  amount: (o) => numeric(o.amount),
+  progress: (o) => numeric(o.progress),
+  progressTotal: (o) => numeric(o.progressTotal),
+  cooldown: (o) => numeric(o.cooldown),
+  storeEnergy: (_o, store) => (store ? numeric(store.energy) : ABSENT),
+  storeCapacity: (_o, store) => (store ? numeric(store.getCapacity('energy')) : ABSENT),
+  storeUsed: (_o, store) => (store ? numeric(store.getUsedCapacity('energy')) : ABSENT),
+};
 
 /**
  * `getObjectsByPrototype()` takes a constructor in JS but a name across the
@@ -156,38 +150,52 @@ export function createHost({
     Visual: visual?.Visual,
 
     /**
-     * Copies one prototype's objects into WASM memory and returns the objects.
+     * The objects of one prototype. No data is copied; `snapshotField` below
+     * fetches what the bot actually reads.
      *
-     * This is the read half of the hybrid backend. One crossing buys both the
-     * data -- every numeric field of every matching object -- and the handles
-     * that actions still need. Reading the same fields one at a time through
-     * handles costs ~500 ns each on the real game; from WASM memory afterwards
-     * they cost ~0.24 ns.
+     * @param {string} name  prototype name, matching `kPrototype` in C++
+     * @returns {object[]} the matching game objects
+     */
+    objectsByPrototype: (name) => {
+      const prototype = byName[name];
+      if (prototype === undefined) {
+        throw new Error(`unknown prototype "${name}"; add it to js/host.mjs`);
+      }
+      return utils.getObjectsByPrototype(prototype);
+    },
+
+    /**
+     * Fills one field, for every object in a slice, in one crossing.
+     *
+     * A *column* rather than a record, on purpose. Reading a property off an
+     * Arena game object costs ~150 ns even from JavaScript, so filling fields
+     * the bot never asks for is money spent for nothing: eagerly writing all 18
+     * slots for 28 creeps measured 104 us a tick on the real game, which was
+     * worse than not snapshotting at all. Loading a column on first use means a
+     * bot pays for the fields it reads, once, however many times it reads them.
      *
      * The view is valid only for the duration of this call, and only because
      * the module is built with ALLOW_MEMORY_GROWTH=0. A heap that grows
      * detaches this buffer and the writes vanish without erroring. See
      * cmake/ArenaBot.cmake.
      *
-     * @param {string} name      prototype name, matching `kPrototype` in C++
-     * @param {Int32Array} view  WASM memory to fill, starting at record 0
-     * @returns {object[]} the matching game objects, in the order written
+     * @param {object[]} objects  the slice, from objectsByPrototype
+     * @param {string} field      which field, from SNAPSHOT_FIELDS
+     * @param {Int32Array} view   WASM memory covering this slice's records
+     * @param {number} slot       the field's index within a record
+     * @param {number} stride     fields per record
      */
-    snapshotByPrototype: (name, view) => {
-      const prototype = byName[name];
-      if (prototype === undefined) {
-        throw new Error(`unknown prototype "${name}"; add it to js/host.mjs`);
+    snapshotField: (objects, field, view, slot, stride) => {
+      const read = READERS[field];
+      if (read === undefined) {
+        throw new Error(`unknown snapshot field "${field}"; see SNAPSHOT_FIELDS`);
       }
 
-      const objects = utils.getObjectsByPrototype(prototype);
-      if (objects.length * SNAPSHOT_FIELD_COUNT <= view.length) {
-        for (let index = 0; index < objects.length; index += 1) {
-          writeRecord(objects[index], view, index * SNAPSHOT_FIELD_COUNT);
-        }
+      const wantsStore = field.startsWith('store');
+      for (let index = 0; index < objects.length; index += 1) {
+        const object = objects[index];
+        view[index * stride + slot] = read(object, wantsStore ? object.store : undefined);
       }
-      // If it does not fit, write nothing: C++ sees the size and falls back to
-      // reading through handles, which is slow but never wrong.
-      return objects;
     },
 
     // --- the constants that <arena/constants.h> refuses to guess at, exposed
